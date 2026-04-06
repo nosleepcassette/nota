@@ -19,7 +19,6 @@ try:
     from rich.console import Console
     from rich.table import Table
     from rich.panel import Panel
-    from rich.text import Text
 
     HAS_RICH = True
 except ImportError:
@@ -41,7 +40,6 @@ def strip_markup(text: str) -> str:
 
 
 def read_key() -> str:
-    """Read a keypress with escape sequence support."""
     if not sys.stdin.isatty():
         return input().strip()[:1] if input().strip() else ""
 
@@ -106,13 +104,34 @@ def get_term_size():
         return os.terminal_size((80, 24))
 
 
-def render_table_plain(tasks: List[Dict], cursor: int, width: int) -> List[str]:
-    """Render table as plain text lines."""
-    lines = []
+def sort_tasks(tasks: List[Dict], sort_by: str, reverse: bool = False) -> List[Dict]:
+    """Sort tasks by given field."""
 
+    def get_sort_key(t):
+        if sort_by == "project":
+            return (t.get("project") or "").lower()
+        elif sort_by == "scope":
+            return (t.get("scope") or "").lower()
+        elif sort_by == "priority":
+            prio = t.get("priority", "")
+            return {"H": 0, "M": 1, "L": 2, "": 3}.get(prio, 3)
+        elif sort_by == "due":
+            return t.get("due") or ""
+        elif sort_by == "description":
+            return (t.get("description") or "").lower()
+        elif sort_by == "status":
+            return t.get("status", "")
+        else:
+            return t.get("id", 0)
+
+    return sorted(tasks, key=get_sort_key, reverse=reverse)
+
+
+def render_table_plain(tasks: List[Dict], cursor: int, width: int) -> List[str]:
+    lines = []
     header = f"{'ID':<4} {'Pri':<3} {'Proj':<8} {'Scope':<8} {'Due':<8} Description"
     lines.append(header)
-    lines.append("─" * min(width, 80))
+    lines.append("─" * width)
 
     for i, t in enumerate(tasks):
         marker = ">" if i == cursor else " "
@@ -122,7 +141,6 @@ def render_table_plain(tasks: List[Dict], cursor: int, width: int) -> List[str]:
         scope = (t.get("scope", "") or "")[:8]
         due = t.get("due", "")[:8] if t.get("due") else "-"
         desc = (t.get("description", "") or "")[:50]
-
         line = (
             f"{marker}{i + 1:<3} {pri_display:<3} {proj:<8} {scope:<8} {due:<8} {desc}"
         )
@@ -132,18 +150,17 @@ def render_table_plain(tasks: List[Dict], cursor: int, width: int) -> List[str]:
 
 
 def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[str]:
-    """Render tasks table, return as list of lines."""
     if not tasks:
         return ["  (no tasks)"]
 
     if HAS_RICH:
-        w = min(width, 80)
+        w = width
         id_w = 4
         pri_w = 3
-        proj_w = 8
-        scope_w = 8
-        due_w = 8
-        desc_w = w - id_w - pri_w - proj_w - scope_w - due_w - 10
+        proj_w = 10
+        scope_w = 10
+        due_w = 10
+        desc_w = w - id_w - pri_w - proj_w - scope_w - due_w - 12
 
         table = Table(
             show_header=True,
@@ -158,14 +175,12 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
             f"[{AMBER}]ID[/{AMBER}]", style=f"{AMBER_DIM}", width=id_w, no_wrap=True
         )
         table.add_column(f"[{AMBER}]Pri[/{AMBER}]", width=pri_w, no_wrap=True)
-        table.add_column(f"[{AMBER}]Proj[/{AMBER}]", style=AMBER, width=proj_w)
+        table.add_column(f"[{AMBER}]Project[/{AMBER}]", style=AMBER, width=proj_w)
         table.add_column(f"[{AMBER}]Scope[/{AMBER}]", style=AMBER, width=scope_w)
         table.add_column(
             f"[{AMBER}]Due[/{AMBER}]", style=AMBER, width=due_w, no_wrap=True
         )
-        table.add_column(
-            f"[{AMBER}]Description[/{AMBER}]", min_width=desc_w, max_width=desc_w
-        )
+        table.add_column(f"[{AMBER}]Description[/{AMBER}]", min_width=desc_w)
 
         for i, t in enumerate(tasks):
             is_cursor = i == cursor
@@ -182,8 +197,8 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
 
             proj = (t.get("project", "") or "")[:proj_w]
             scope = (t.get("scope", "") or "")[:scope_w]
-            due = t.get("due", "")[:8] if t.get("due") else "-"
-            desc = (t.get("description", "") or "")[:desc_w]
+            due = t.get("due", "")[:10] if t.get("due") else "-"
+            desc = t.get("description", "") or ""
 
             if is_cursor:
                 row_style = f"reverse {AMBER}"
@@ -196,10 +211,10 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
             table.add_row(
                 f"{style_open}{i + 1:<{id_w}}{style_close}",
                 f"{style_open}{pri_display:<{pri_w}}{style_close}",
-                f"{style_open}{proj:<{proj_w}.{proj_w}}{style_close}",
-                f"{style_open}{scope:<{scope_w}.{scope_w}}{style_close}",
+                f"{style_open}{proj:<{proj_w}}{style_close}",
+                f"{style_open}{scope:<{scope_w}}{style_close}",
                 f"{style_open}{due:<{due_w}}{style_close}",
-                f"{style_open}{prefix} {desc:<{desc_w - 2}}{style_close}",
+                f"{style_open}{prefix} {desc}{style_close}",
             )
 
         console = Console(force_terminal=True)
@@ -212,7 +227,6 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
 
 
 def render_task_detail(t) -> str:
-    """Render single task detail."""
     if not t:
         return "Select a task to view details"
 
@@ -267,7 +281,7 @@ def render_task_detail(t) -> str:
 def render_help() -> str:
     return """
   [bold]Commands[/bold]
-    (a)dd  (d)one  (D)elete  (v)iew  (e)dit  se(a)rch  (q)uit
+    (a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit
 
   [dim]press ? for full help[/dim]
 """
@@ -288,12 +302,26 @@ def render_full_help() -> str:
     a               add new task
     e               edit task (opens in editor)
     / or r          search tasks
+    s               sort menu
     ?               toggle this help
     q               quit
 
-  [bold amber]Tips[/bold amber]
-    vim-style: j=down, k=up, h=back, l=forward
-    arrow keys work too
+  [bold amber]Sort options[/bold amber]
+    s p             sort by project
+    s s             sort by scope
+    s r             sort by priority
+    s d             sort by due date
+    s t             sort by description
+    s i             sort by id (default)
+    s .             toggle reverse
+"""
+
+
+def render_sort_menu() -> str:
+    return """
+  [bold amber]Sort by:[/bold amber]
+    (p)roject  (s)cope  (r)riority  (d)ue  (t)itle  (i)d
+    (.)toggle reverse  (q)uit
 """
 
 
@@ -302,10 +330,13 @@ def run():
 
     tasks = task_list(status="pending", limit=50)
     cursor = 0
+    sort_by = "id"
+    sort_reverse = False
 
     show_help = False
     show_full_help = False
     show_detail = False
+    show_sort = False
     detail_task = None
     search_query = ""
     pending_key = ""
@@ -321,34 +352,53 @@ def run():
             q = search_query.lower()
             display_tasks = [t for t in tasks if q in t.get("description", "").lower()]
 
+        display_tasks = sort_tasks(display_tasks, sort_by, sort_reverse)
+
         if first_render:
             clear_screen()
             first_render = False
 
         frame = []
-        frame.append("")
 
         if HAS_RICH:
             console = Console(force_terminal=True)
             banner = Panel(
-                "(a)dd  (d)one  (D)elete  (v)iew  (e)dit  se(a)rch  (q)uit",
+                "(a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit",
                 border_style=AMBER,
                 box=box.ROUNDED,
                 padding=(0, 2),
             )
             console.print(banner)
         else:
-            frame.append("  (a)dd  (d)one  (D)elete  (v)iew  (e)dit  sea(r)ch  (q)uit")
+            frame.append("  (a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit")
             frame.append("─" * term_width)
 
-        frame.append("")
+        sort_indicator = (
+            f" \033[90msorted by {sort_by}"
+            + (" (reverse)" if sort_reverse else "")
+            + "\033[0m"
+        )
         frame.append(
-            f"\033[1;33mnota\033[0m - taskwarrior  \033[90m│\033[0m press \033[1;33m?\033[0m for help"
+            f"\033[1;33mnota\033[0m - taskwarrior{sort_indicator}  \033[90m│\033[0m press \033[1;33m?\033[0m for help"
         )
         frame.append("\033[90m" + "─" * (term_width - 1) + "\033[0m")
         frame.append("")
 
-        if show_help:
+        if show_sort:
+            if HAS_RICH:
+                sort_panel = Panel(
+                    render_sort_menu(),
+                    title="\033[1;33msort\033[0m",
+                    border_style=AMBER,
+                    box=box.ROUNDED,
+                    padding=(1, 2),
+                )
+                console = Console(force_terminal=True)
+                console.print(sort_panel)
+            else:
+                frame.append(render_sort_menu())
+
+        elif show_help:
             if HAS_RICH:
                 help_text = render_full_help() if show_full_help else render_help()
                 help_panel = Panel(
@@ -391,9 +441,11 @@ def run():
         status_line += "\033[90m]\033[0m"
         frame.append(status_line)
 
-        sys.stdout.write("\033[H")
-        sys.stdout.write("\n".join(frame))
-        sys.stdout.write("\033[J")
+        sys.stdout.write("\033[2J\033[H")
+        output = "\n".join(frame)
+        sys.stdout.write(output)
+        if not frame or frame[-1] != "\n":
+            sys.stdout.write("\n")
         sys.stdout.flush()
 
         key = read_key()
@@ -404,6 +456,7 @@ def run():
         elif key == "ESC":
             show_help = False
             show_detail = False
+            show_sort = False
 
         elif key == "?":
             if not show_help:
@@ -415,6 +468,39 @@ def run():
                 show_help = False
                 show_full_help = False
             show_detail = False
+            show_sort = False
+
+        elif key == "s" and not show_sort:
+            show_sort = True
+            show_help = False
+            show_detail = False
+
+        elif key == "s" and show_sort:
+            show_sort = False
+
+        elif show_sort:
+            if key == "p":
+                sort_by = "project"
+                show_sort = False
+            elif key == "s":
+                sort_by = "scope"
+                show_sort = False
+            elif key == "r":
+                sort_by = "priority"
+                show_sort = False
+            elif key == "d":
+                sort_by = "due"
+                show_sort = False
+            elif key == "t":
+                sort_by = "description"
+                show_sort = False
+            elif key == "i":
+                sort_by = "id"
+                show_sort = False
+            elif key == ".":
+                sort_reverse = not sort_reverse
+            else:
+                show_sort = False
 
         elif key in ("j", "DOWN", "k", "UP"):
             if key in ("j", "DOWN"):
@@ -479,6 +565,7 @@ def run():
                 detail_task = task_get(t.get("id"))
                 show_detail = True
                 show_help = False
+                show_sort = False
             pending_key = ""
 
         elif key == "h" and show_detail:
@@ -501,6 +588,7 @@ def run():
                 detail_task = task_get(t.get("id"))
                 show_detail = True
                 show_help = False
+                show_sort = False
             pending_key = ""
 
         elif key == "e":
@@ -546,9 +634,6 @@ def run():
         elif key == "r":
             search_query = ""
             pending_key = ""
-
-        elif key in ("q", "Q"):
-            break
 
         else:
             pending_key = ""
