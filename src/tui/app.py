@@ -368,7 +368,9 @@ def run():
                 box=box.ROUNDED,
                 padding=(0, 2),
             )
-            console.print(banner)
+            with console.capture() as cap:
+                console.print(banner)
+            frame.extend(cap.get().split("\n"))
         else:
             frame.append("  (a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit")
             frame.append("─" * term_width)
@@ -379,7 +381,7 @@ def run():
             + "\033[0m"
         )
         frame.append(
-            f"\033[1;33mnota\033[0m - taskwarrior{sort_indicator}  \033[90m│\033[0m press \033[1;33m?\033[0m for help"
+            f"\033[1;33mnota\033[0m{sort_indicator}  \033[90m│\033[0m press \033[1;33m?\033[0m for help"
         )
         frame.append("\033[90m" + "─" * (term_width - 1) + "\033[0m")
         frame.append("")
@@ -394,7 +396,9 @@ def run():
                     padding=(1, 2),
                 )
                 console = Console(force_terminal=True)
-                console.print(sort_panel)
+                with console.capture() as cap:
+                    console.print(sort_panel)
+                frame.extend(cap.get().split("\n"))
             else:
                 frame.append(render_sort_menu())
 
@@ -409,7 +413,9 @@ def run():
                     padding=(1, 2),
                 )
                 console = Console(force_terminal=True)
-                console.print(help_panel)
+                with console.capture() as cap:
+                    console.print(help_panel)
+                frame.extend(cap.get().split("\n"))
             else:
                 frame.append(render_help())
 
@@ -423,7 +429,9 @@ def run():
                     box=box.ROUNDED,
                 )
                 console = Console(force_terminal=True)
-                console.print(detail)
+                with console.capture() as cap:
+                    console.print(detail)
+                frame.extend(cap.get().split("\n"))
             else:
                 frame.append(render_task_detail(detail_task))
 
