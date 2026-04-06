@@ -14,6 +14,7 @@ import tty
 from typing import Optional
 
 try:
+    from rich import box
     from rich.console import Console
     from rich.table import Table
     from rich.panel import Panel
@@ -111,27 +112,6 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> str:
     if HAS_RICH:
         console = Console(width=width, highlight=False, force_terminal=True)
 
-        from rich.box import Box
-
-        table = Table(
-            show_header=True,
-            header_style=f"bold {AMBER}",
-            border_style=AMBER_DIM,
-            box=Box(
-                HORIZONTALS="─",
-                VERTICALS="│",
-                INTERSECTIONS="┼",
-                TOP_INTERSECTIONS="┬",
-                BOTTOM_INTERSECTIONS="┴",
-                TOP_LEFT="┌",
-                TOP_RIGHT="┐",
-                BOTTOM_LEFT="└",
-                BOTTOM_RIGHT="┘",
-            ),
-            padding=(0, 1),
-            pad_edge=False,
-        )
-
         w = min(width, 80)
         id_w = 4
         pri_w = 3
@@ -139,6 +119,15 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> str:
         scope_w = 8
         due_w = 8
         desc_w = w - id_w - pri_w - proj_w - scope_w - due_w - 10
+
+        table = Table(
+            show_header=True,
+            header_style=f"bold {AMBER}",
+            border_style=AMBER_DIM,
+            box=box.SIMPLE,
+            padding=(0, 1),
+            pad_edge=False,
+        )
 
         table.add_column(
             f"[{AMBER}]ID[/{AMBER}]", style=f"{AMBER_DIM}", width=id_w, no_wrap=True
@@ -312,17 +301,7 @@ def run():
                     render_help(),
                     title="\033[1;33mhelp\033[0m",
                     border_style=AMBER,
-                    box=Box(
-                        HORIZONTALS="─",
-                        VERTICALS="│",
-                        INTERSECTIONS="├",
-                        TOP_INTERSECTIONS="┬",
-                        BOTTOM_INTERSECTIONS="┴",
-                        TOP_LEFT="┌",
-                        TOP_RIGHT="┐",
-                        BOTTOM_LEFT="└",
-                        BOTTOM_RIGHT="┘",
-                    ),
+                    box=box.SIMPLE,
                 )
                 print(help_panel)
             else:
@@ -335,17 +314,7 @@ def run():
                     title=f"\033[1;33mtask #{detail_task.get('id', '?')}\033[0m",
                     border_style=AMBER,
                     padding=(1, 2),
-                    box=Box(
-                        HORIZONTALS="─",
-                        VERTICALS="│",
-                        INTERSECTIONS="├",
-                        TOP_INTERSECTIONS="┬",
-                        BOTTOM_INTERSECTIONS="┴",
-                        TOP_LEFT="┌",
-                        TOP_RIGHT="┐",
-                        BOTTOM_LEFT="└",
-                        BOTTOM_RIGHT="┘",
-                    ),
+                    box=box.SIMPLE,
                 )
                 print(detail)
             else:
