@@ -548,6 +548,48 @@ def cmd_track(args):
         print(f"Already logged '{name}' today.")
 
 
+def cmd_habit(args):
+    """Show stats for a single habit."""
+    from src.harsh import (
+        get_streak, get_longest_streak, get_completion_rate, get_history, 
+        count_today, habit_names, add_habit
+    )
+    
+    name = args.habit
+    if name not in habit_names():
+        print(f"Habit '{name}' not found.", file=sys.stderr)
+        sys.exit(1)
+    
+    if args.stats or (not args.streak and not args.history and not args.chart):
+        # Default to full stats
+        streak = get_streak(name)
+        longest = get_longest_streak(name)
+        rate_30 = get_completion_rate(name, days=30)
+        rate_7 = get_completion_rate(name, days=7)
+        today_count = count_today(name)
+        
+        print(f"\n── {name} ─────────────────────────────")
+        print(f"  Today:      {today_count}")
+        print(f"  Streak:    {streak} days")
+        print(f"  Longest:   {longest} days")
+        print(f"  7-day:     {rate_7:.0f}%")
+        print(f"  30-day:    {rate_30:.0f}%")
+        print()
+    
+    elif args.streak:
+        streak = get_streak(name)
+        print(f"{streak}")
+    
+    elif args.history:
+        history = get_history(name, days=args.days)
+        print(f"\n── {name} · last {args.days} days ──────────────")
+        for entry in history[:args.days]:
+            date_str = entry["date"][-5:]  # MM-DD
+            bar = "█" * entry["count"] if entry["count"] > 0 else "·"
+            print(f"  {date_str}  {bar} ({entry['count']})")
+        print()
+
+
 def cmd_habits(args):
     """Show today's habit status. Falls back to harsh CLI if available."""
     import subprocess as _sp
@@ -781,6 +823,14 @@ def main():
     p_hb = sub.add_parser("habits", help="Show today's habit status")
     p_hb.add_argument("--json", action="store_true")
 
+    p_habit = sub.add_parser("habit", help="Show stats for a single habit")
+    p_habit.add_argument("habit", help="Habit name")
+    p_habit.add_argument("--stats", action="store_true", help="Show full stats")
+    p_habit.add_argument("--streak", action="store_true", help="Show current streak only")
+    p_habit.add_argument("--history", action="store_true", help="Show history")
+    p_habit.add_argument("--chart", action="store_true", help="Show text bar chart")
+    p_habit.add_argument("--days", type=int, default=30, help="Days for history/chart")
+
     p_find = sub.add_parser("find", help="Advanced search/filter")
     p_find.add_argument("--project")
     p_find.add_argument("--scope")
@@ -823,6 +873,7 @@ def main():
         "log":        cmd_log,
         "did":        lambda a: cmd_track(type("A", (), {"habit": a.habit, "result": "y", "note": a.note})()),
         "habits":     cmd_habits,
+        "habit":      cmd_habit,
         "mcp":        cmd_mcp,
     }[args.cmd](args)
 
