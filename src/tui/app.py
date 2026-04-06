@@ -11,7 +11,7 @@ import sys
 import select
 import termios
 import tty
-from typing import Optional
+from typing import Optional, List, Dict
 
 try:
     from rich import box
@@ -83,34 +83,60 @@ def read_key() -> str:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+def hide_cursor():
+    sys.stdout.write("\033[?25l")
+    sys.stdout.flush()
+
+
+def show_cursor():
+    sys.stdout.write("\033[?25h")
+    sys.stdout.flush()
+
+
 def clear_screen():
-    """Clear screen without flickering - use direct ANSI."""
     sys.stdout.write("\033[2J\033[H")
     sys.stdout.flush()
 
 
-def erase_lines(n: int):
-    """Erase n lines upwards (for cursor movement)."""
-    for _ in range(n):
-        sys.stdout.write("\033[A\033[2K")
-    sys.stdout.flush()
-
-
 def get_term_size():
-    """Get terminal size."""
     try:
         return os.get_terminal_size()
     except:
         return os.terminal_size((80, 24))
 
 
-def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> str:
-    """Render tasks in clean table format with amber theme."""
+def render_table_plain(tasks: List[Dict], cursor: int, width: int) -> List[str]:
+    """Render table as plain text lines."""
+    lines = []
+
+    header = f"{'ID':<4} {'Pri':<3} {'Proj':<8} {'Scope':<8} {'Due':<8} Description"
+    lines.append(header)
+    lines.append("─" * min(width, 80))
+
+    for i, t in enumerate(tasks):
+        marker = ">" if i == cursor else " "
+        pri = t.get("priority", "")
+        pri_display = {"H": "!!!", "M": "!!", "L": "~", "": "-"}.get(pri, "-")
+        proj = (t.get("project", "") or "")[:8]
+        scope = (t.get("scope", "") or "")[:8]
+        due = t.get("due", "")[:8] if t.get("due") else "-"
+        desc = (t.get("description", "") or "")[:50]
+
+        line = (
+            f"{marker}{i + 1:<3} {pri_display:<3} {proj:<8} {scope:<8} {due:<8} {desc}"
+        )
+        lines.append(line)
+
+    return lines
+
+
+def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[str]:
+    """Render tasks table, return as list of lines."""
     if not tasks:
-        return "  (no tasks)"
+        return ["  (no tasks)"]
 
     if HAS_RICH:
-        console = Console(width=width, highlight=False, force_terminal=True)
+        console = Console(width=width, force_terminal=True, quiet=True)
 
         w = min(width, 80)
         id_w = 4
@@ -144,27 +170,26 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> str:
 
         for i, t in enumerate(tasks):
             is_cursor = i == cursor
-
             pri = t.get("priority", "")
             pri_display = {"H": "!!!", "M": "!!", "L": "~", "": "-"}.get(pri, "-")
 
             status = t.get("status", "pending")
             if status == "completed":
                 prefix = f"[{AMBER}]+[/{AMBER}]"
-                desc_style = f"{AMBER_DIM}"
             elif status == "waiting":
                 prefix = f"[{AMBER}]~[/{AMBER}]"
-                desc_style = AMBER
             else:
                 prefix = " "
-                desc_style = "white" if not is_cursor else f"bold {AMBER}"
 
             proj = (t.get("project", "") or "")[:proj_w]
             scope = (t.get("scope", "") or "")[:scope_w]
             due = t.get("due", "")[:8] if t.get("due") else "-"
             desc = (t.get("description", "") or "")[:desc_w]
 
-            row_style = f"on black {CURSOR_AMBER}" if is_cursor else "on black"
+            if is_cursor:
+                row_style = f"reverse {AMBER}"
+            else:
+                row_style = ""
 
             table.add_row(
                 f"[{row_style}]{i + 1:<{id_w}}[/{row_style}]",
@@ -175,30 +200,15 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> str:
                 f"[{row_style}]{prefix} {desc:<{desc_w - 2}}[/{row_style}]",
             )
 
-        console.print(table)
-        return ""
+        output = console.render(table)
+        lines = output.split("\n")
+        return lines
     else:
-        header = f"{'ID':<4} {'Pri':<3} {'Proj':<8} {'Scope':<8} {'Due':<8} Description"
-        print(header)
-        print("─" * width)
-
-        for i, t in enumerate(tasks):
-            marker = ">" if i == cursor else " "
-            pri = t.get("priority", "")
-            pri_display = {"H": "!!!", "M": "!!", "L": "~", "": "-"}.get(pri, "-")
-            proj = (t.get("project", "") or "")[:8]
-            scope = (t.get("scope", "") or "")[:8]
-            due = t.get("due", "")[:8] if t.get("due") else "-"
-            desc = (t.get("description", "") or "")[:50]
-            print(
-                f"{marker}{i + 1:<3} {pri_display:<3} {proj:<8} {scope:<8} {due:<8} {desc}"
-            )
-
-        return ""
+        return render_table_plain(tasks, cursor, width)
 
 
 def render_task_detail(t) -> str:
-    """Render single task detail in clean panel."""
+    """Render single task detail."""
     if not t:
         return "Select a task to view details"
 
@@ -251,7 +261,6 @@ def render_task_detail(t) -> str:
 
 
 def render_help() -> str:
-    """Render help panel."""
     return """
   [bold]Commands[/bold]
     (a)dd  (d)one  (D)elete  (v)iew  (e)dit  se(a)rch  (q)uit
@@ -261,7 +270,6 @@ def render_help() -> str:
 
 
 def render_full_help() -> str:
-    """Render full help panel."""
     return """
   [bold amber]Navigation[/bold amber]
     j/k or arrows   move up/down
@@ -282,12 +290,10 @@ def render_full_help() -> str:
   [bold amber]Tips[/bold amber]
     vim-style: j=down, k=up, h=back, l=forward
     arrow keys work too
-    press q or esc to close panels
 """
 
 
 def run():
-    """Run the TUI."""
     from src.tw import task_list, task_get, task_done, task_add, task_delete
 
     tasks = task_list(status="pending", limit=50)
@@ -301,6 +307,9 @@ def run():
     pending_key = ""
 
     term_width = get_term_size().columns
+    first_render = True
+
+    hide_cursor()
 
     while True:
         display_tasks = tasks
@@ -308,7 +317,12 @@ def run():
             q = search_query.lower()
             display_tasks = [t for t in tasks if q in t.get("description", "").lower()]
 
-        clear_screen()
+        if first_render:
+            clear_screen()
+            first_render = False
+
+        frame = []
+        frame.append("")
 
         if HAS_RICH:
             console = Console(force_terminal=True)
@@ -320,14 +334,15 @@ def run():
             )
             console.print(banner)
         else:
-            print("  [a]dd  [d]one  [D]elete  [v]iew  [e]dit  sea[r]ch  [q]uit")
-            print("─" * term_width)
+            frame.append("  (a)dd  (d)one  (D)elete  (v)iew  (e)dit  sea(r)ch  (q)uit")
+            frame.append("─" * term_width)
 
-        print(
+        frame.append("")
+        frame.append(
             f"\033[1;33mnota\033[0m - taskwarrior  \033[90m│\033[0m press \033[1;33m?\033[0m for help"
         )
-        print("\033[90m" + "─" * (term_width - 1) + "\033[0m")
-        print()
+        frame.append("\033[90m" + "─" * (term_width - 1) + "\033[0m")
+        frame.append("")
 
         if show_help:
             if HAS_RICH:
@@ -342,7 +357,7 @@ def run():
                 console = Console(force_terminal=True)
                 console.print(help_panel)
             else:
-                print(render_help())
+                frame.append(render_help())
 
         elif show_detail and detail_task:
             if HAS_RICH:
@@ -356,20 +371,26 @@ def run():
                 console = Console(force_terminal=True)
                 console.print(detail)
             else:
-                print(render_task_detail(detail_task))
+                frame.append(render_task_detail(detail_task))
 
         else:
-            render_tasks_table(display_tasks, cursor, term_width)
+            table_lines = render_tasks_table(display_tasks, cursor, term_width)
+            frame.extend(table_lines)
 
-        print()
+        frame.append("")
         status_line = f"\033[90m[\033[0m"
         if search_query:
             status_line += f" search: {search_query}  │"
         status_line += f" {len(display_tasks)} tasks"
         if show_detail:
-            status_line += "  │ press h/l for prev/next, q to quit"
+            status_line += "  │ h/l prev/next, q close"
         status_line += "\033[90m]\033[0m"
-        print(status_line)
+        frame.append(status_line)
+
+        sys.stdout.write("\033[H")
+        sys.stdout.write("\n".join(frame))
+        sys.stdout.write("\033[J")
+        sys.stdout.flush()
 
         key = read_key()
 
@@ -492,17 +513,21 @@ def run():
             pending_key = ""
 
         elif key == "/":
+            show_cursor()
             sys.stdout.write("  \033[90msearch: \033[0m")
             sys.stdout.flush()
             search_query = input().strip()
+            hide_cursor()
             cursor = 0
             show_detail = False
             pending_key = ""
 
         elif key == "a":
+            show_cursor()
             sys.stdout.write("  \033[90madd task: \033[0m")
             sys.stdout.flush()
             new_task = input().strip()
+            hide_cursor()
             if new_task:
                 task_add(description=new_task)
                 tasks = task_list(status="pending", limit=50)
@@ -523,17 +548,8 @@ def run():
 
         else:
             pending_key = ""
-            new_task = input().strip()
-            if new_task:
-                task_add(description=new_task)
-                tasks = task_list(status="pending", limit=50)
-                display_tasks = tasks
-                if search_query:
-                    q = search_query.lower()
-                    display_tasks = [
-                        t for t in tasks if q in t.get("description", "").lower()
-                    ]
 
+    show_cursor()
     clear_screen()
 
 
