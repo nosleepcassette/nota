@@ -366,7 +366,7 @@ def run():
         if HAS_RICH:
             console = Console(force_terminal=True)
             banner = Panel(
-                "(a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  gg/G",
+                "(a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  (g)o top/bot",
                 border_style=AMBER,
                 box=box.ROUNDED,
                 padding=(0, 2),
@@ -376,7 +376,7 @@ def run():
             frame.extend(cap.get().split("\n"))
         else:
             frame.append(
-                "  (a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  gg/G"
+                "  (a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  (g)o top/bot"
             )
             frame.append("─" * term_width)
 
@@ -526,12 +526,8 @@ def run():
             pending_key = ""
 
         elif key == "g":
-            pending_key = "g"
-
-        elif pending_key == "g" and key == "g":
             cursor = 0
             show_detail = False
-            pending_key = ""
 
         elif key == "G":
             if display_tasks:
