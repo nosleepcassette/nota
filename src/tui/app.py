@@ -188,16 +188,19 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
 
             if is_cursor:
                 row_style = f"reverse {AMBER}"
+                style_open = f"[{row_style}]"
+                style_close = "[/]"
             else:
-                row_style = ""
+                style_open = ""
+                style_close = ""
 
             table.add_row(
-                f"[{row_style}]{i + 1:<{id_w}}[/{row_style}]",
-                f"[{row_style}]{pri_display:<{pri_w}}[/{row_style}]",
-                f"[{row_style}]{proj:<{proj_w}.{proj_w}}[/{row_style}]",
-                f"[{row_style}]{scope:<{scope_w}.{scope_w}}[/{row_style}]",
-                f"[{row_style}]{due:<{due_w}}[/{row_style}]",
-                f"[{row_style}]{prefix} {desc:<{desc_w - 2}}[/{row_style}]",
+                f"{style_open}{i + 1:<{id_w}}{style_close}",
+                f"{style_open}{pri_display:<{pri_w}}{style_close}",
+                f"{style_open}{proj:<{proj_w}.{proj_w}}{style_close}",
+                f"{style_open}{scope:<{scope_w}.{scope_w}}{style_close}",
+                f"{style_open}{due:<{due_w}}{style_close}",
+                f"{style_open}{prefix} {desc:<{desc_w - 2}}{style_close}",
             )
 
         output = "".join(console.render(table))
