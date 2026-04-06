@@ -44,13 +44,16 @@ def read_key() -> str:
         return input().strip()[:1] if input().strip() else ""
 
     def decode(seq: str) -> str:
-        if seq.startswith("[A") or seq.startswith("OA"):
+        if seq == "":
+            return ""
+        first_char = seq[0] if seq else ""
+        if first_char == "A":
             return "UP"
-        if seq.startswith("[B") or seq.startswith("OB"):
+        if first_char == "B":
             return "DOWN"
-        if seq.startswith("[C") or seq.startswith("OC"):
+        if first_char == "C":
             return "RIGHT"
-        if seq.startswith("[D") or seq.startswith("OD"):
+        if first_char == "D":
             return "LEFT"
         return ""
 
@@ -363,7 +366,7 @@ def run():
         if HAS_RICH:
             console = Console(force_terminal=True)
             banner = Panel(
-                "(a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit",
+                "(a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  gg/G",
                 border_style=AMBER,
                 box=box.ROUNDED,
                 padding=(0, 2),
@@ -372,7 +375,9 @@ def run():
                 console.print(banner)
             frame.extend(cap.get().split("\n"))
         else:
-            frame.append("  (a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit")
+            frame.append(
+                "  (a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  gg/G"
+            )
             frame.append("─" * term_width)
 
         sort_indicator = (
