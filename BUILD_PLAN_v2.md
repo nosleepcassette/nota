@@ -10,48 +10,48 @@
 **Goal:** Local NL date parsing, config/scopes, task modification, basic filtering
 
 ### A1: Local Date Parsing (`dateparse.py`)
-- [ ] Install `dateparser` library
-- [ ] Create `src/dateparse.py`
+- [x] Install `dateparser` library
+- [x] Create `src/dateparse.py`
   - `parse_date(input: str) → str | None`
   - Handle TW shortcuts: today, tomorrow, eod, eow, eom, eoq
   - Use dateparser for NL dates
   - Return None on parse failure
-- [ ] Integrate into `parse.py`
+- [x] Integrate into `parse.py`
   - Parse `due:...` tokens through dateparse
   - Fall back to store-as-is on None
-- [ ] Test: 20+ date patterns
+- [x] Test: 20+ date patterns
 
 ### A2: Config & Scopes
-- [ ] Create `src/config.py`
+- [x] Create `src/config.py`
   - Load `~/.nota/nota.toml`
   - Defaults: db path, default project, etc.
-- [ ] Create `src/scopes.py`
+- [x] Create `src/scopes.py`
   - Load default scopes (10)
   - Merge user scopes from `nota.toml` `[scopes]` section
   - `list_scopes() → [(name, emoji?, desc?)]`
   - `add_scope(name)`, `rm_scope(name)`
-- [ ] Create `~/.nota/` dir if not exists
-- [ ] Create default `~/.nota/nota.toml` if not exists
-- [ ] Update `parse.py` to use dynamic scope list
+- [x] Create `~/.nota/` dir if not exists
+- [x] Create default `~/.nota/nota.toml` if not exists
+- [x] Update `parse.py` to use dynamic scope list
 
 ### A3: Task Modification (`nota edit`)
-- [ ] Add `nota edit ID [flags]` command
-- [ ] Flags: `--title`, `--project`, `--priority`, `--due`, `--scope`, `--add-tag`, `--rm-tag`, `--body`
-- [ ] Call `task_modify()` from tw.py
-- [ ] Add `nota_modify` MCP tool
+- [x] Add `nota edit ID [flags]` command
+- [x] Flags: `--title`, `--project`, `--priority`, `--due`, `--scope`, `--add-tag`, `--rm-tag`, `--body`
+- [x] Call `task_modify()` from tw.py
+- [x] Add `nota_modify` MCP tool
 
 ### A4: Basic Filtering (`nota find`)
-- [ ] Create `src/query.py`
+- [x] Create `src/query.py`
   - `build_filter(args) → str` (taskwarrior expression)
   - Custom filters: `--overdue`, `--due-this-week`, `--unblocked`, `--has-annotation`
-- [ ] Add `nota find [expression]` command
-- [ ] Add `nota_find` MCP tool
+- [x] Add `nota find [expression]` command
+- [x] Add `nota_find` MCP tool
 
 **A Complete Criteria:**
-- `nota add "task due:friday"` stores ISO
-- `nota scopes` lists all scopes
-- `nota edit 1 --project admin` works
-- `nota find --overdue` works
+- [x] `nota add "task due:friday"` stores ISO
+- [x] `nota scopes` lists all scopes
+- [x] `nota edit 1 --project admin` works
+- [x] `nota find --overdue` works
 
 ---
 

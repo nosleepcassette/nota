@@ -42,8 +42,9 @@ from src.parse import parse_inline
 from src.tw import (
     task_add, task_get, task_list, task_next, task_blocked,
     task_done, task_depend, task_annotate, task_projects,
-    task_modify, fmt_row, fmt_detail, _run,
+    task_modify, fmt_row, fmt_detail, _run, _run_json,
 )
+from src.scopes import list_scopes, add_scope as scope_add, rm_scope as scope_rm
 
 
 # ── commands ──────────────────────────────────────────────────────────────────
@@ -60,6 +61,27 @@ def cmd_add(args):
     # Map p-priority to tw priority
     pri = parsed["priority"]
     pri_p = f"p{pri}"
+    
+    # Handle recurrence aliases
+    recur = args.recur
+    until = args.until
+    if recur:
+        recur_map = {
+            "daily": "daily", "weekly": "weekly", "biweekly": "biweekly",
+            "monthly": "monthly", "quarterly": "quarterly", "annual": "annual"
+        }
+        if recur in recur_map:
+            recur = recur_map[recur]
+        # Recurring tasks need a due date
+        if not parsed["due_date"] and not args.due:
+            print("Recurring tasks require a due date. Use due:DATE in title or --due flag.", file=sys.stderr)
+            sys.exit(1)
+    
+    # Parse NL dates for wait/scheduled
+    from src.dateparse import parse_date
+    wait = parse_date(args.wait) if args.wait else None
+    scheduled = parse_date(args.scheduled) if args.scheduled else None
+    until_date = parse_date(until) if until else None
 
     # Create the main task
     task = task_add(
@@ -70,6 +92,10 @@ def cmd_add(args):
         tags=parsed["tags"],
         scope=parsed["scope"] or None,
         body=args.body or None,
+        recur=recur,
+        until=until_date,
+        wait=wait,
+        scheduled=scheduled,
     )
     main_id = task.get("id")
 
@@ -190,21 +216,262 @@ def cmd_show(args):
 
 
 def cmd_done(args):
-    ok = task_done(args.id)
-    if ok:
-        print(f"Done: [{args.id}]")
-    else:
-        print(f"Could not complete task {args.id}.", file=sys.stderr)
+    """Mark task(s) complete."""
+    # Handle bulk IDs
+    ids = []
+    if hasattr(args, 'ids') and args.ids:
+        ids = args.ids
+    elif hasattr(args, 'id') and args.id:
+        ids = [args.id]
+    
+    # Handle --project, --scope, --filter flags
+    if args.project or args.scope or args.filter:
+        tasks = task_list(
+            project=args.project,
+            scope=args.scope,
+            status="pending",
+            extra_filter=args.filter,
+            limit=500,
+        )
+        ids = [t["id"] for t in tasks]
+    
+    if not ids:
+        print("No tasks specified.", file=sys.stderr)
         sys.exit(1)
+    
+    results = []
+    for task_id in ids:
+        ok = task_done(task_id)
+        results.append((task_id, ok))
+    
+    success = sum(1 for _, ok in results if ok)
+    print(f"Completed {success}/{len(results)} task(s)")
+    for task_id, ok in results:
+        if ok:
+            print(f"  ✓ [{task_id}]")
+        else:
+            print(f"  ✗ [{task_id}]")
+
+
+def cmd_edit(args):
+    """Edit an existing task."""
+    task_id = args.id
+    updates = {}
+    
+    if args.title:
+        updates["description"] = args.title
+    if args.project:
+        updates["project"] = args.project
+    if args.priority:
+        updates["priority_p"] = f"p{args.priority}"
+    if args.due:
+        from src.dateparse import parse_date
+        updates["due"] = parse_date(args.due) or args.due
+    if args.scope:
+        updates["scope"] = args.scope
+    if args.add_tag:
+        updates.setdefault("tags_add", []).append(args.add_tag)
+    if args.rm_tag:
+        updates.setdefault("tags_remove", []).append(args.rm_tag)
+    if args.body:
+        task_annotate(task_id, args.body)
+    
+    if updates:
+        result = task_modify(task_id, **updates)
+        if result:
+            t = task_get(task_id)
+            if t and args.json:
+                print(json.dumps(t))
+            elif t:
+                print(f"Updated [{task_id}] {t['description']}")
+        else:
+            print(f"Failed to update task {task_id}.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        t = task_get(task_id)
+        if t and args.json:
+            print(json.dumps(t))
+        elif t:
+            print(fmt_detail(t))
+        else:
+            print(f"Task {task_id} not found.", file=sys.stderr)
+            sys.exit(1)
+
+
+def cmd_scopes(args):
+    """List or manage scopes."""
+    if args.add:
+        ok = scope_add(args.add, args.emoji, args.description)
+        if ok:
+            print(f"Added scope: {args.add}")
+        else:
+            print(f"Scope '{args.add}' already exists or is a default.", file=sys.stderr)
+            sys.exit(1)
+    elif args.remove:
+        ok = scope_rm(args.remove)
+        if ok:
+            print(f"Removed scope: {args.remove}")
+        else:
+            print(f"Scope '{args.remove}' not found or is a default.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        scopes = list_scopes()
+        if args.json:
+            print(json.dumps(scopes))
+            return
+        print("\n── scopes ──────────────────────────")
+        for s in sorted(scopes, key=lambda x: x["name"]):
+            emoji = s["emoji"] or "  "
+            print(f"  {emoji}  {s['name']:<14} {s['description']}")
+        print()
+
+
+def cmd_move(args):
+    """Move task(s) to another project."""
+    ids = args.ids
+    project = args.project
+    
+    results = []
+    for task_id in ids:
+        ok = task_modify(task_id, project=project)
+        results.append((task_id, bool(ok)))
+    
+    success = sum(1 for _, ok in results if ok)
+    print(f"Moved {success}/{len(results)} task(s) to @{project}")
+    for task_id, ok in results:
+        print(f"  {'✓' if ok else '✗'} [{task_id}]")
+
+
+def cmd_tag(args):
+    """Add/remove tags from task(s)."""
+    ids = args.ids
+    tags_add = args.add or []
+    tags_rm = args.rm or []
+    
+    if not tags_add and not tags_rm:
+        print("No tags specified. Use --add or --rm.", file=sys.stderr)
+        sys.exit(1)
+    
+    results = []
+    for task_id in ids:
+        ok = task_modify(task_id, tags_add=tags_add, tags_remove=tags_rm)
+        results.append((task_id, bool(ok)))
+    
+    success = sum(1 for _, ok in results if ok)
+    print(f"Tagged {success}/{len(results)} task(s)")
+    for task_id, ok in results:
+        print(f"  {'✓' if ok else '✗'} [{task_id}]")
 
 
 def cmd_depend(args):
+    """Set dependency: task ID depends on task ID2."""
     ok = task_depend(args.id, args.on)
     if ok:
         print(f"[{args.id}] now depends on [{args.on}]")
     else:
         print("Failed to set dependency.", file=sys.stderr)
         sys.exit(1)
+
+
+def cmd_relate(args):
+    """Create relations between tasks using tags."""
+    task_id = args.id
+    target_id = args.to or args.blocks or args.subtask
+    
+    if not target_id:
+        print("Specify --to, --blocks, or --subtask.", file=sys.stderr)
+        sys.exit(1)
+    
+    if args.to:
+        rel_type = "related"
+    elif args.blocks:
+        rel_type = "blocks"
+    elif args.subtask:
+        rel_type = "subtask"
+    
+    # Add tag to source task
+    ok1 = task_modify(task_id, tags_add=[f"related:{target_id}"])
+    
+    # Add reverse tag to target task
+    ok2 = task_modify(target_id, tags_add=[f"related:{task_id}"])
+    
+    if ok1 and ok2:
+        print(f"Created {rel_type} relation: [{task_id}] ↔ [{target_id}]")
+    else:
+        print(f"Failed to create relation.", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_related(args):
+    """Show tasks related to a given task."""
+    task_id = args.id
+    t = task_get(task_id)
+    
+    if not t:
+        print(f"Task {task_id} not found.", file=sys.stderr)
+        sys.exit(1)
+    
+    tags = t.get("tags", [])
+    related_ids = []
+    for tag in tags:
+        if tag.startswith("related:"):
+            try:
+                related_ids.append(int(tag.split(":")[1]))
+            except:
+                pass
+    
+    if not related_ids:
+        print(f"No related tasks for [{task_id}]")
+        return
+    
+    print(f"\n── related to [{task_id}] ─────────────────")
+    for rid in related_ids:
+        rt = task_get(rid)
+        if rt:
+            status = "✓" if rt.get("status") == "completed" else " "
+            print(f"  [{rid}] {status} {rt.get('description','')}")
+    print()
+
+
+def cmd_tree(args):
+    """Show dependency tree for a task."""
+    task_id = args.id
+    
+    def get_depends(tid):
+        t = task_get(tid)
+        if not t:
+            return []
+        return t.get("depends", [])
+    
+    def render_tree(tid, prefix="", is_last=True):
+        t = task_get(tid)
+        if not t:
+            return []
+        
+        status = "✓" if t.get("status") == "completed" else "○"
+        desc = t.get("description", "")[:50]
+        line = f"{prefix}[{tid}] {status} {desc}"
+        lines = [line]
+        
+        deps = get_depends(tid)
+        new_prefix = prefix + ("    " if is_last else "│   ")
+        
+        for i, dep_uuid in enumerate(deps):
+            # Look up UUID to get ID
+            found = _run_json(f"uuid:{dep_uuid}", "export")
+            if found:
+                dep_id = found[0].get("id")
+                is_last_dep = (i == len(deps) - 1)
+                connector = "└── " if is_last_dep else "├── "
+                lines.extend(render_tree(dep_id, new_prefix + connector, is_last_dep))
+        
+        return lines
+    
+    print(f"\n── dependency tree for [{task_id}] ────────────")
+    lines = render_tree(task_id, "", True)
+    for line in lines:
+        print(line)
+    print()
 
 
 def cmd_annotate(args):
@@ -226,6 +493,38 @@ def cmd_projects(args):
         return
     for p in projects:
         print(f"  {p['project']:<24} {p['count']} task(s)")
+
+
+def cmd_recurring(args):
+    """List recurring task parents."""
+    tasks = _run_json("status:recurring", "export")
+    if args.json:
+        print(json.dumps(tasks))
+        return
+    if not tasks:
+        print("No recurring tasks.")
+        return
+    print("\n── recurring ─────────────────────────")
+    for t in tasks:
+        recur = t.get("recur", "")
+        print(f"  [{t['id']}] {t['description']:<40} recur:{recur}")
+    print()
+
+
+def cmd_waiting(args):
+    """List waiting/hidden tasks."""
+    tasks = task_list(status="waiting", limit=100)
+    if args.json:
+        print(json.dumps(tasks))
+        return
+    if not tasks:
+        print("No waiting tasks.")
+        return
+    print("\n── waiting ────────────────────────────")
+    for t in tasks:
+        wait = t.get("wait", "")[:10] if t.get("wait") else ""
+        print(f"  [{t['id']}] {t['description']:<40} wait:{wait}")
+    print()
 
 
 def cmd_braindump(args):
@@ -313,6 +612,51 @@ def cmd_mcp(args):
         sys.exit(1)
 
 
+def cmd_find(args):
+    """Advanced search/filter."""
+    from src.query import build_filter
+    
+    filters = build_filter(
+        project=args.project,
+        scope=args.scope,
+        priority=args.priority,
+        status=args.status,
+        overdue=args.overdue,
+        due_this_week=args.due_this_week,
+        has_annotation=args.has_annotation,
+        unblocked=args.unblocked,
+        extra=args.expression,
+    )
+    
+    extra = " ".join(filters) if filters else ""
+    
+    tasks = task_list(
+        project=args.project,
+        scope=args.scope,
+        priority_p=f"p{args.priority}" if args.priority else None,
+        status=args.status or "pending",
+        extra_filter=extra,
+        limit=args.limit,
+    )
+    
+    if args.json:
+        print(json.dumps(tasks))
+        return
+    
+    if not tasks:
+        print("No tasks found.")
+        return
+    
+    by_project: dict = {}
+    for t in tasks:
+        proj = t.get("project") or "inbox"
+        by_project.setdefault(proj, []).append(t)
+    for proj in sorted(by_project):
+        print(f"\n── {proj} ──")
+        for t in by_project[proj]:
+            print(fmt_row(t))
+
+
 # ── CLI wiring ────────────────────────────────────────────────────────────────
 
 def main():
@@ -329,6 +673,10 @@ def main():
     p_add.add_argument("title", help='"task title [p1] [@proj] [#tag] [scope:X] [due:DATE] [-> prereq] [:: related]"')
     p_add.add_argument("--body", default="", help="Notes (added as annotation)")
     p_add.add_argument("--json", action="store_true")
+    p_add.add_argument("--recur", help="Recurrence (daily, weekly, biweekly, monthly, quarterly, annual)")
+    p_add.add_argument("--until", help="Recurrence end date")
+    p_add.add_argument("--wait", help="Wait until date (hidden until)")
+    p_add.add_argument("--scheduled", help="Scheduled date (actionable after)")
 
     p_list = sub.add_parser("list", help="List pending tasks")
     p_list.add_argument("--project", default=None)
@@ -347,12 +695,62 @@ def main():
     p_show.add_argument("id", type=int)
     p_show.add_argument("--json", action="store_true")
 
-    p_done = sub.add_parser("done", help="Mark task complete")
-    p_done.add_argument("id", type=int)
+    p_done = sub.add_parser("done", help="Mark task(s) complete")
+    p_done.add_argument("ids", nargs="*", type=int, help="Task ID(s) to complete")
+    p_done.add_argument("--project", help="Complete all in project")
+    p_done.add_argument("--scope", help="Complete all in scope")
+    p_done.add_argument("--filter", help="Raw taskwarrior filter expression")
+
+    p_move = sub.add_parser("move", help="Move task(s) to project")
+    p_move.add_argument("ids", nargs="+", type=int, help="Task ID(s)")
+    p_move.add_argument("--project", required=True, help="Target project")
+
+    p_tag = sub.add_parser("tag", help="Add/remove tags from task(s)")
+    p_tag.add_argument("ids", nargs="+", type=int, help="Task ID(s)")
+    p_tag.add_argument("--add", action="append", help="Tag to add (can repeat)")
+    p_tag.add_argument("--rm", action="append", help="Tag to remove (can repeat)")
+
+    p_edit = sub.add_parser("edit", help="Edit an existing task")
+    p_edit.add_argument("id", type=int, help="Task ID to edit")
+    p_edit.add_argument("--title", default=None, help="New title")
+    p_edit.add_argument("--project", default=None, help="Change project")
+    p_edit.add_argument("--priority", type=int, choices=[1,2,3,4], help="Priority (1-4)")
+    p_edit.add_argument("--due", default=None, help="Due date (NL supported)")
+    p_edit.add_argument("--scope", default=None, help="Scope")
+    p_edit.add_argument("--add-tag", default=None, help="Add a tag")
+    p_edit.add_argument("--rm-tag", default=None, help="Remove a tag")
+    p_edit.add_argument("--body", default=None, help="Add note/annotation")
+    p_edit.add_argument("--json", action="store_true")
+
+    p_scopes = sub.add_parser("scopes", help="List or manage scopes")
+    p_scopes.add_argument("--add", metavar="NAME", help="Add a custom scope")
+    p_scopes.add_argument("--emoji", help="Emoji for --add")
+    p_scopes.add_argument("--description", help="Description for --add")
+    p_scopes.add_argument("--remove", metavar="NAME", help="Remove a custom scope")
+    p_scopes.add_argument("--json", action="store_true")
 
     p_dep = sub.add_parser("depend", help="Set dependency: ID depends on ID2")
     p_dep.add_argument("id", type=int)
     p_dep.add_argument("--on", type=int, required=True, metavar="ID2", help="Prerequisite task ID")
+
+    p_relate = sub.add_parser("relate", help="Create relation between tasks")
+    p_relate.add_argument("id", type=int, help="Source task ID")
+    p_relate.add_argument("--to", type=int, help="Related task ID")
+    p_relate.add_argument("--blocks", type=int, help="Task ID that this blocks")
+    p_relate.add_argument("--subtask", type=int, help="Subtask ID")
+
+    p_related = sub.add_parser("related", help="Show related tasks")
+    p_related.add_argument("id", type=int, help="Task ID")
+
+    p_tree = sub.add_parser("tree", help="Show dependency tree")
+    p_tree.add_argument("id", type=int, help="Task ID")
+
+    # Recurring commands
+    p_recur = sub.add_parser("recurring", help="List recurring tasks")
+    p_recur.add_argument("--json", action="store_true")
+
+    p_waiting = sub.add_parser("waiting", help="List waiting tasks")
+    p_waiting.add_argument("--json", action="store_true")
 
     p_ann = sub.add_parser("annotate", help="Add a note to a task")
     p_ann.add_argument("id", type=int)
@@ -383,6 +781,19 @@ def main():
     p_hb = sub.add_parser("habits", help="Show today's habit status")
     p_hb.add_argument("--json", action="store_true")
 
+    p_find = sub.add_parser("find", help="Advanced search/filter")
+    p_find.add_argument("--project")
+    p_find.add_argument("--scope")
+    p_find.add_argument("--priority", type=int, choices=[1,2,3,4])
+    p_find.add_argument("--status", default="pending", help="Status filter (default: pending)")
+    p_find.add_argument("--overdue", action="store_true", help="Due before today")
+    p_find.add_argument("--due-this-week", action="store_true", help="Due by end of week")
+    p_find.add_argument("--has-annotation", action="store_true", help="Has notes")
+    p_find.add_argument("--unblocked", action="store_true", help="Not blocked")
+    p_find.add_argument("--limit", type=int, default=50)
+    p_find.add_argument("expression", nargs="?", help="Raw taskwarrior expression")
+    p_find.add_argument("--json", action="store_true")
+
     sub.add_parser("mcp", help="Start MCP stdio server")
 
     args = parser.parse_args()
@@ -394,9 +805,19 @@ def main():
         "blocked":  cmd_blocked,
         "show":     cmd_show,
         "done":     cmd_done,
+        "edit":     cmd_edit,
+        "move":     cmd_move,
+        "tag":      cmd_tag,
+        "scopes":   cmd_scopes,
+        "find":     cmd_find,
         "depend":   cmd_depend,
+        "relate":   cmd_relate,
+        "related":  cmd_related,
+        "tree":     cmd_tree,
         "annotate": cmd_annotate,
         "projects":   cmd_projects,
+        "recurring": cmd_recurring,
+        "waiting":   cmd_waiting,
         "braindump":  cmd_braindump,
         "track":      cmd_track,
         "log":        cmd_log,

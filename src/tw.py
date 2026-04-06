@@ -38,12 +38,15 @@ PRIORITY_TO_LABEL = {"H": "!!!!", "M": "!!", "L": "~", "": ""}
 
 # ── low-level subprocess ───────────────────────────────────────────────────────
 
+
 def _run(*args: str, input_data: Optional[str] = None, confirm: bool = False) -> str:
     """
     Run a task command. Returns stdout as string.
     Raises RuntimeError on non-zero exit (unless it's a confirmation prompt).
     """
-    cmd = [TASK_BIN, "rc.confirmation=off", "rc.recurrence.confirmation=off"] + list(args)
+    cmd = [TASK_BIN, "rc.confirmation=off", "rc.recurrence.confirmation=off"] + list(
+        args
+    )
     result = subprocess.run(
         cmd,
         input=input_data,
@@ -68,6 +71,7 @@ def _run_json(*args: str) -> List[Dict[str, Any]]:
 
 SCOPE_VALUES = "meatspace,digital,server,opencassette,appointment,recurring,waiting,creative,admin,errand"
 
+
 def setup_udas() -> List[str]:
     """
     Install nota UDAs into ~/.taskrc. Idempotent.
@@ -75,8 +79,8 @@ def setup_udas() -> List[str]:
     """
     actions = []
     configs = [
-        ("uda.scope.type",   "string"),
-        ("uda.scope.label",  "Scope"),
+        ("uda.scope.type", "string"),
+        ("uda.scope.label", "Scope"),
         ("uda.scope.values", SCOPE_VALUES),
     ]
     for key, value in configs:
@@ -92,18 +96,20 @@ def setup_udas() -> List[str]:
 
 # ── add ───────────────────────────────────────────────────────────────────────
 
+
 def task_add(
     description: str,
     project: Optional[str] = None,
-    priority_p: Optional[str] = None,   # "p1"–"p4"
+    priority_p: Optional[str] = None,  # "p1"–"p4"
     due: Optional[str] = None,
     wait: Optional[str] = None,
     scheduled: Optional[str] = None,
     recur: Optional[str] = None,
+    until: Optional[str] = None,
     tags: Optional[List[str]] = None,
     scope: Optional[str] = None,
     depends: Optional[List[int]] = None,  # list of task IDs
-    body: Optional[str] = None,           # added as annotation after creation
+    body: Optional[str] = None,  # added as annotation after creation
 ) -> Dict[str, Any]:
     """
     Add a task via `task add`. Returns the created task dict (from export).
@@ -124,11 +130,13 @@ def task_add(
         args.append(f"scheduled:{scheduled}")
     if recur:
         args.append(f"recur:{recur}")
+    if until:
+        args.append(f"until:{until}")
     if scope:
         args.append(f"scope:{scope}")
     if depends:
         args.append(f"depends:{','.join(str(d) for d in depends)}")
-    for tag in (tags or []):
+    for tag in tags or []:
         args.append(f"+{tag}")
 
     # Description must come last
@@ -156,6 +164,7 @@ def task_add(
 
 
 # ── query ─────────────────────────────────────────────────────────────────────
+
 
 def task_get(task_id: int) -> Optional[Dict[str, Any]]:
     """Return full task dict for one task ID. None if not found."""
@@ -219,10 +228,14 @@ def task_projects() -> List[Dict[str, Any]]:
     for t in tasks:
         proj = t.get("project") or "inbox"
         counts[proj] = counts.get(proj, 0) + 1
-    return [{"project": k, "count": v} for k, v in sorted(counts.items(), key=lambda x: -x[1])]
+    return [
+        {"project": k, "count": v}
+        for k, v in sorted(counts.items(), key=lambda x: -x[1])
+    ]
 
 
 # ── modify ────────────────────────────────────────────────────────────────────
+
 
 def task_done(task_id: int) -> bool:
     """Mark task complete. Returns True on success."""
@@ -290,6 +303,7 @@ def task_annotate(task_id: int, note: str) -> bool:
 
 # ── import ────────────────────────────────────────────────────────────────────
 
+
 def task_import(tasks_json: List[Dict[str, Any]]) -> str:
     """
     Import tasks from a JSON list. Used by braindump.
@@ -299,6 +313,7 @@ def task_import(tasks_json: List[Dict[str, Any]]) -> str:
 
 
 # ── formatting helpers ────────────────────────────────────────────────────────
+
 
 def fmt_row(t: Dict[str, Any]) -> str:
     tid = t.get("id", "?")
@@ -326,19 +341,19 @@ def fmt_row(t: Dict[str, Any]) -> str:
 def fmt_detail(t: Dict[str, Any]) -> str:
     lines = [
         f"Task #{t.get('id')} — {t.get('description')}",
-        f"  UUID:     {t.get('uuid','')}",
-        f"  Project:  {t.get('project','(none)')}",
-        f"  Priority: {t.get('priority','(none)')} {PRIORITY_TO_LABEL.get(t.get('priority',''),'')}",
-        f"  Scope:    {t.get('scope','(none)')}",
+        f"  UUID:     {t.get('uuid', '')}",
+        f"  Project:  {t.get('project', '(none)')}",
+        f"  Priority: {t.get('priority', '(none)')} {PRIORITY_TO_LABEL.get(t.get('priority', ''), '')}",
+        f"  Scope:    {t.get('scope', '(none)')}",
         f"  Due:      {(t.get('due') or '')[:8] or '(none)'}",
-        f"  Status:   {t.get('status','')}",
-        f"  Urgency:  {t.get('urgency',0):.2f}",
+        f"  Status:   {t.get('status', '')}",
+        f"  Urgency:  {t.get('urgency', 0):.2f}",
         f"  Tags:     {', '.join(t.get('tags') or []) or '(none)'}",
     ]
     if t.get("annotations"):
         lines.append("  Notes:")
         for ann in t["annotations"]:
-            lines.append(f"    {ann.get('description','')}")
+            lines.append(f"    {ann.get('description', '')}")
     if t.get("depends"):
         lines.append("  Depends on (prerequisites):")
         for dep_uuid in t["depends"]:
@@ -347,5 +362,7 @@ def fmt_detail(t: Dict[str, Any]) -> str:
             if found:
                 d = found[0]
                 mark = "✓" if d.get("status") == "completed" else "○"
-                lines.append(f"    {mark} [{d.get('id','?')}] {d.get('description','')}")
+                lines.append(
+                    f"    {mark} [{d.get('id', '?')}] {d.get('description', '')}"
+                )
     return "\n".join(lines)

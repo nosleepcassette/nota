@@ -37,11 +37,21 @@ from mcp import types
 
 from src.parse import parse_inline
 from src.tw import (
-    task_add, task_get, task_list, task_next, task_blocked,
-    task_done, task_depend, task_annotate, task_projects,
-    fmt_detail, _run,
+    task_add,
+    task_get,
+    task_list,
+    task_next,
+    task_blocked,
+    task_done,
+    task_depend,
+    task_annotate,
+    task_projects,
+    task_modify,
+    fmt_detail,
+    _run,
 )
 from src.harsh import log_habit, log_habit_count, count_today
+from src.query import build_filter
 
 server = Server("nota")
 
@@ -60,8 +70,14 @@ async def list_tools():
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": "Task title with optional inline syntax"},
-                    "body": {"type": "string", "description": "Optional notes (added as annotation)"},
+                    "title": {
+                        "type": "string",
+                        "description": "Task title with optional inline syntax",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optional notes (added as annotation)",
+                    },
                 },
                 "required": ["title"],
             },
@@ -77,7 +93,10 @@ async def list_tools():
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "Freeform text to parse into tasks"},
+                    "text": {
+                        "type": "string",
+                        "description": "Freeform text to parse into tasks",
+                    },
                 },
                 "required": ["text"],
             },
@@ -91,10 +110,20 @@ async def list_tools():
                     "project": {"type": "string"},
                     "scope": {
                         "type": "string",
-                        "enum": ["meatspace","digital","server","opencassette",
-                                 "appointment","recurring","waiting","creative","admin","errand"],
+                        "enum": [
+                            "meatspace",
+                            "digital",
+                            "server",
+                            "opencassette",
+                            "appointment",
+                            "recurring",
+                            "waiting",
+                            "creative",
+                            "admin",
+                            "errand",
+                        ],
                     },
-                    "priority": {"type": "integer", "enum": [1,2,3,4]},
+                    "priority": {"type": "integer", "enum": [1, 2, 3, 4]},
                 },
             },
         ),
@@ -142,7 +171,10 @@ async def list_tools():
                 "type": "object",
                 "properties": {
                     "id": {"type": "integer", "description": "The blocked task"},
-                    "prerequisite_id": {"type": "integer", "description": "Must be completed first"},
+                    "prerequisite_id": {
+                        "type": "integer",
+                        "description": "Must be completed first",
+                    },
                 },
                 "required": ["id", "prerequisite_id"],
             },
@@ -174,7 +206,10 @@ async def list_tools():
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "habit": {"type": "string", "description": "Habit name, must match entry in ~/.config/harsh/habits"},
+                    "habit": {
+                        "type": "string",
+                        "description": "Habit name, must match entry in ~/.config/harsh/habits",
+                    },
                     "comment": {"type": "string", "description": "Optional note"},
                 },
                 "required": ["habit"],
@@ -191,19 +226,96 @@ async def list_tools():
                 "type": "object",
                 "properties": {
                     "habit": {"type": "string", "description": "Habit name"},
-                    "comment": {"type": "string", "description": "Optional note for this instance"},
+                    "comment": {
+                        "type": "string",
+                        "description": "Optional note for this instance",
+                    },
                 },
                 "required": ["habit"],
             },
+        ),
+        types.Tool(
+            name="nota_modify",
+            description=(
+                "Modify an existing task. "
+                "Can change title, project, priority, due date, scope, add/remove tags, or add body/annotation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "description": "Task ID to modify"},
+                    "title": {"type": "string", "description": "New title"},
+                    "project": {"type": "string", "description": "New project"},
+                    "priority": {
+                        "type": "integer",
+                        "enum": [1, 2, 3, 4],
+                        "description": "Priority (1=urgent, 4=someday)",
+                    },
+                    "due": {
+                        "type": "string",
+                        "description": "Due date (NL supported, e.g. 'friday', 'tomorrow')",
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope (meatspace, digital, server, etc.)",
+                    },
+                    "tags_add": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Tags to add",
+                    },
+                    "tags_remove": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Tags to remove",
+                    },
+                    "body": {"type": "string", "description": "Add annotation/note"},
+                },
+                "required": ["id"],
+            },
+        ),
+        types.Tool(
+            name="nota_find",
+            description=(
+                "Advanced search/filter tasks. "
+                "Supports project, scope, priority filters plus custom filters: "
+                "overdue, due-this-week, unblocked, has-annotation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string"},
+                    "scope": {"type": "string"},
+                    "priority": {"type": "integer", "enum": [1, 2, 3, 4]},
+                    "status": {"type": "string", "default": "pending"},
+                    "overdue": {"type": "boolean"},
+                    "due_this_week": {"type": "boolean"},
+                    "has_annotation": {"type": "boolean"},
+                    "unblocked": {"type": "boolean"},
+                    "expression": {
+                        "type": "string",
+                        "description": "Raw taskwarrior expression",
+                    },
+                    "limit": {"type": "integer", "default": 50},
+                },
+            },
+        ),
+        types.Tool(
+            name="nota_scopes",
+            description="List all available scopes (default + user-defined).",
+            inputSchema={"type": "object", "properties": {}},
         ),
     ]
 
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
-
     def text(content) -> list:
-        return [types.TextContent(type="text", text=json.dumps(content, indent=2, default=str))]
+        return [
+            types.TextContent(
+                type="text", text=json.dumps(content, indent=2, default=str)
+            )
+        ]
 
     if name == "nota_add":
         title = arguments["title"]
@@ -227,8 +339,9 @@ async def call_tool(name: str, arguments: dict):
             sub_p = parse_inline(sub_title)
             sub_task = task_add(
                 description=sub_p["title"],
-                project=sub_p["project"] if sub_p["project"] != "inbox" else (
-                    parsed["project"] if parsed["project"] != "inbox" else None),
+                project=sub_p["project"]
+                if sub_p["project"] != "inbox"
+                else (parsed["project"] if parsed["project"] != "inbox" else None),
                 priority_p=f"p{sub_p['priority']}",
                 due=sub_p["due_date"],
                 scope=sub_p["scope"] or parsed["scope"] or None,
@@ -243,10 +356,18 @@ async def call_tool(name: str, arguments: dict):
         for rel_title in parsed["related_titles"]:
             all_tasks = task_list(status="pending", limit=500)
             existing = next(
-                (t for t in all_tasks if rel_title.lower() in t.get("description","").lower()),
-                None
+                (
+                    t
+                    for t in all_tasks
+                    if rel_title.lower() in t.get("description", "").lower()
+                ),
+                None,
             )
-            rel_id = existing["id"] if existing else task_add(description=rel_title).get("id")
+            rel_id = (
+                existing["id"]
+                if existing
+                else task_add(description=rel_title).get("id")
+            )
             if main_id and rel_id:
                 task_annotate(main_id, f"related: [{rel_id}] {rel_title}")
                 task_annotate(rel_id, f"related: [{main_id}] {parsed['title']}")
@@ -300,8 +421,14 @@ async def call_tool(name: str, arguments: dict):
         comment = arguments.get("comment", "")
         ok = log_habit(habit, comment=comment)
         today_count = count_today(habit)
-        return text({"ok": ok, "habit": habit, "today_count": today_count,
-                     "message": "logged" if ok else "already logged today"})
+        return text(
+            {
+                "ok": ok,
+                "habit": habit,
+                "today_count": today_count,
+                "message": "logged" if ok else "already logged today",
+            }
+        )
 
     elif name == "nota_log":
         habit = arguments["habit"]
@@ -309,14 +436,79 @@ async def call_tool(name: str, arguments: dict):
         today_count = log_habit_count(habit, comment=comment)
         return text({"ok": True, "habit": habit, "today_count": today_count})
 
+    elif name == "nota_modify":
+        task_id = arguments["id"]
+        updates = {}
+
+        if "title" in arguments and arguments["title"]:
+            updates["description"] = arguments["title"]
+        if "project" in arguments and arguments["project"]:
+            updates["project"] = arguments["project"]
+        if "priority" in arguments and arguments["priority"]:
+            updates["priority_p"] = f"p{arguments['priority']}"
+        if "due" in arguments and arguments["due"]:
+            from src.dateparse import parse_date
+
+            updates["due"] = parse_date(arguments["due"]) or arguments["due"]
+        if "scope" in arguments and arguments["scope"]:
+            updates["scope"] = arguments["scope"]
+        if "tags_add" in arguments and arguments["tags_add"]:
+            updates["tags_add"] = arguments["tags_add"]
+        if "tags_remove" in arguments and arguments["tags_remove"]:
+            updates["tags_remove"] = arguments["tags_remove"]
+        if "body" in arguments and arguments["body"]:
+            task_annotate(task_id, arguments["body"])
+
+        result = task_modify(task_id, **updates) if updates else task_get(task_id)
+        return text({"ok": True, "task": result})
+
+    elif name == "nota_find":
+        from src.dateparse import parse_date
+
+        due = arguments.get("due")
+        due_arg = parse_date(due) if due else None
+
+        extra_parts = build_filter(
+            project=arguments.get("project"),
+            scope=arguments.get("scope"),
+            priority=arguments.get("priority"),
+            status=arguments.get("status", "pending"),
+            overdue=arguments.get("overdue"),
+            due_this_week=arguments.get("due_this_week"),
+            has_annotation=arguments.get("has_annotation"),
+            unblocked=arguments.get("unblocked"),
+            extra=arguments.get("expression"),
+        )
+        extra = " ".join(extra_parts) if extra_parts else None
+
+        tasks = task_list(
+            project=arguments.get("project"),
+            scope=arguments.get("scope"),
+            priority_p=f"p{arguments.get('priority')}"
+            if arguments.get("priority")
+            else None,
+            status=arguments.get("status", "pending"),
+            extra_filter=extra,
+            limit=arguments.get("limit", 50),
+        )
+        return text(tasks)
+
+    elif name == "nota_scopes":
+        from src.scopes import list_scopes
+
+        return text(list_scopes())
+
     return text({"error": f"Unknown tool: {name}"})
 
 
 def run():
     import asyncio
+
     asyncio.run(_run_server())
 
 
 async def _run_server():
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+        await server.run(
+            read_stream, write_stream, server.create_initialization_options()
+        )

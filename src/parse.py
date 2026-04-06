@@ -18,12 +18,16 @@ Combinable: "reply to pick n pull p2 @admin -> find stamps :: clean room"
 import re
 from typing import Any, Dict, List
 
+from src.dateparse import parse_date as parse_nl_date
+from src.scopes import get_all_scopes, is_valid_scope
+
+
 PRIORITY_MAP = {"p1": 1, "p2": 2, "p3": 3, "p4": 4}
 
-VALID_SCOPES = {
-    "meatspace", "digital", "server", "opencassette",
-    "appointment", "recurring", "waiting", "creative", "admin", "errand",
-}
+
+def _get_scopes_set() -> set:
+    """Get scopes as a set for validation."""
+    return set(get_all_scopes().keys())
 
 
 def parse_inline(text: str) -> Dict[str, Any]:
@@ -84,14 +88,15 @@ def parse_inline(text: str) -> Dict[str, Any]:
             tokens_to_remove.append(token)
         elif low.startswith("scope:"):
             sc = low[6:]
-            if sc in VALID_SCOPES:
+            valid_scopes = _get_scopes_set()
+            if sc in valid_scopes:
                 scope = sc
             else:
-                # Unknown scope — keep as tag rather than silently drop
                 tags.append(f"scope:{sc}")
             tokens_to_remove.append(token)
         elif low.startswith("due:"):
-            due_date = token[4:]  # store as-is; Phase 1 will parse dates properly
+            due_raw = token[4:]
+            due_date = parse_nl_date(due_raw) or due_raw  # parse NL, fallback to raw
             tokens_to_remove.append(token)
 
     for tok in tokens_to_remove:
