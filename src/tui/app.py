@@ -123,8 +123,8 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> str:
         table = Table(
             show_header=True,
             header_style=f"bold {AMBER}",
-            border_style=AMBER_DIM,
-            box=box.SIMPLE,
+            border_style=AMBER,
+            box=box.ROUNDED,
             padding=(0, 1),
             pad_edge=False,
         )
@@ -253,17 +253,36 @@ def render_task_detail(t) -> str:
 def render_help() -> str:
     """Render help panel."""
     return """
-  [bold amber]Keys[/bold amber]
+  [bold]Commands[/bold]
+    (a)dd    (d)one    (e)dit    (v)iew    se(a)rch
+    (g)o top (G)o bot  (q)uit
+
+  [dim]press ? for full help[/dim]
+"""
+
+
+def render_full_help() -> str:
+    """Render full help panel."""
+    return """
+  [bold amber]Navigation[/bold amber]
     j/k or arrows   move up/down
-    h/l             prev/next task detail
-    enter           view selected task
-    d               mark done
-    a               add task
-    /               search
+    h/l             prev/next task (in detail view)
     g               go to top
     G               go to bottom
+
+  [bold amber]Actions[/bold amber]
+    enter           view task detail
+    d               mark done
+    a               add new task
+    e               edit task (opens in editor)
+    /               search tasks
+    ?               toggle this help
     q               quit
-    ?               toggle help
+
+  [bold amber]Tips[/bold amber]
+    vim-style: j=down, k=up, h=back, l=forward
+    arrow keys work too
+    press q or esc to close panels
 """
 
 
@@ -275,6 +294,7 @@ def run():
     cursor = 0
 
     show_help = False
+    show_full_help = False
     show_detail = False
     detail_task = None
     search_query = ""
@@ -297,13 +317,16 @@ def run():
 
         if show_help:
             if HAS_RICH:
+                help_text = render_full_help() if show_full_help else render_help()
                 help_panel = Panel(
-                    render_help(),
+                    help_text,
                     title="\033[1;33mhelp\033[0m",
                     border_style=AMBER,
-                    box=box.SIMPLE,
+                    box=box.ROUNDED,
+                    padding=(1, 2),
                 )
-                print(help_panel)
+                console = Console(force_terminal=True)
+                console.print(help_panel)
             else:
                 print(render_help())
 
@@ -314,9 +337,10 @@ def run():
                     title=f"\033[1;33mtask #{detail_task.get('id', '?')}\033[0m",
                     border_style=AMBER,
                     padding=(1, 2),
-                    box=box.SIMPLE,
+                    box=box.ROUNDED,
                 )
-                print(detail)
+                console = Console(force_terminal=True)
+                console.print(detail)
             else:
                 print(render_task_detail(detail_task))
 
@@ -343,7 +367,14 @@ def run():
             show_detail = False
 
         elif key == "?":
-            show_help = not show_help
+            if not show_help:
+                show_help = True
+                show_full_help = False
+            elif not show_full_help:
+                show_full_help = True
+            else:
+                show_help = False
+                show_full_help = False
             show_detail = False
 
         elif key in ("j", "DOWN", "k", "UP"):
