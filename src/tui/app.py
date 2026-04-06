@@ -200,7 +200,7 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
                 f"[{row_style}]{prefix} {desc:<{desc_w - 2}}[/{row_style}]",
             )
 
-        output = console.render(table)
+        output = "".join(console.render(table))
         lines = output.split("\n")
         return lines
     else:
