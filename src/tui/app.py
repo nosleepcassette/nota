@@ -137,8 +137,6 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
         return ["  (no tasks)"]
 
     if HAS_RICH:
-        console = Console(width=width, force_terminal=True, quiet=True)
-
         w = min(width, 80)
         id_w = 4
         pri_w = 3
@@ -204,13 +202,10 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
                 f"{style_open}{prefix} {desc:<{desc_w - 2}}{style_close}",
             )
 
-        from io import StringIO
-
-        string_io = StringIO()
-        console = Console(file=string_io, width=width, force_terminal=True, quiet=True)
-        console.print(table)
-        output = string_io.getvalue()
-        lines = output.split("\n")
+        console = Console(force_terminal=True)
+        with console.capture() as cap:
+            console.print(table)
+        lines = cap.get().split("\n")
         return lines
     else:
         return render_table_plain(tasks, cursor, width)
