@@ -11,6 +11,7 @@ import sys
 import select
 import termios
 import tty
+from io import StringIO
 from typing import Optional, List, Dict
 
 try:
@@ -203,7 +204,12 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
                 f"{style_open}{prefix} {desc:<{desc_w - 2}}{style_close}",
             )
 
-        output = "".join(console.render(table))
+        from io import StringIO
+
+        string_io = StringIO()
+        console = Console(file=string_io, width=width, force_terminal=True, quiet=True)
+        console.print(table)
+        output = string_io.getvalue()
         lines = output.split("\n")
         return lines
     else:
