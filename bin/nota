@@ -654,6 +654,16 @@ def cmd_mcp(args):
         sys.exit(1)
 
 
+def cmd_bene(args):
+    """Launch TUI."""
+    try:
+        from src.tui.app import run
+        run()
+    except ImportError as e:
+        print(f"TUI not available: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_find(args):
     """Advanced search/filter."""
     from src.query import build_filter
@@ -846,6 +856,8 @@ def main():
 
     sub.add_parser("mcp", help="Start MCP stdio server")
 
+    sub.add_parser("bene", help="Launch TUI (nota bene)")
+
     args = parser.parse_args()
     {
         "setup":    cmd_setup,
@@ -874,6 +886,7 @@ def main():
         "did":        lambda a: cmd_track(type("A", (), {"habit": a.habit, "result": "y", "note": a.note})()),
         "habits":     cmd_habits,
         "habit":      cmd_habit,
+        "bene":       cmd_bene,
         "mcp":        cmd_mcp,
     }[args.cmd](args)
 
