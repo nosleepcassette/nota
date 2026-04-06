@@ -254,8 +254,7 @@ def render_help() -> str:
     """Render help panel."""
     return """
   [bold]Commands[/bold]
-    (a)dd    (d)one    (e)dit    (v)iew    se(a)rch
-    (g)o top (G)o bot  (q)uit
+    (a)dd  (d)one  (D)elete  (v)iew  (e)dit  se(a)rch  (q)uit
 
   [dim]press ? for full help[/dim]
 """
@@ -267,15 +266,16 @@ def render_full_help() -> str:
   [bold amber]Navigation[/bold amber]
     j/k or arrows   move up/down
     h/l             prev/next task (in detail view)
-    g               go to top
+    gg              go to top
     G               go to bottom
 
   [bold amber]Actions[/bold amber]
-    enter           view task detail
+    enter or v      view task detail
     d               mark done
+    dd              delete task
     a               add new task
     e               edit task (opens in editor)
-    /               search tasks
+    / or r          search tasks
     ?               toggle this help
     q               quit
 
@@ -288,7 +288,7 @@ def render_full_help() -> str:
 
 def run():
     """Run the TUI."""
-    from src.tw import task_list, task_get, task_done, task_add
+    from src.tw import task_list, task_get, task_done, task_add, task_delete
 
     tasks = task_list(status="pending", limit=50)
     cursor = 0
@@ -298,6 +298,7 @@ def run():
     show_detail = False
     detail_task = None
     search_query = ""
+    pending_key = ""
 
     term_width = get_term_size().columns
 
@@ -308,6 +309,19 @@ def run():
             display_tasks = [t for t in tasks if q in t.get("description", "").lower()]
 
         clear_screen()
+
+        if HAS_RICH:
+            console = Console(force_terminal=True)
+            banner = Panel(
+                "(a)dd  (d)one  (D)elete  (v)iew  (e)dit  se(a)rch  (q)uit",
+                border_style=AMBER,
+                box=box.ROUNDED,
+                padding=(0, 2),
+            )
+            console.print(banner)
+        else:
+            print("  [a]dd  [d]one  [D]elete  [v]iew  [e]dit  sea[r]ch  [q]uit")
+            print("─" * term_width)
 
         print(
             f"\033[1;33mnota\033[0m - taskwarrior  \033[90m│\033[0m press \033[1;33m?\033[0m for help"
@@ -385,39 +399,26 @@ def run():
                 if cursor > 0:
                     cursor -= 1
             show_detail = False
+            pending_key = ""
 
         elif key == "g":
+            pending_key = "g"
+
+        elif pending_key == "g" and key == "g":
             cursor = 0
             show_detail = False
+            pending_key = ""
 
         elif key == "G":
             if display_tasks:
                 cursor = len(display_tasks) - 1
             show_detail = False
+            pending_key = ""
 
-        elif key in ("\n", "ENTER"):
+        elif pending_key == "d" and key == "d":
             if display_tasks and cursor < len(display_tasks):
                 t = display_tasks[cursor]
-                detail_task = task_get(t.get("id"))
-                show_detail = True
-                show_help = False
-
-        elif key == "h" and show_detail:
-            if cursor > 0:
-                cursor -= 1
-                t = display_tasks[cursor]
-                detail_task = task_get(t.get("id"))
-
-        elif key == "l" and show_detail:
-            if cursor < len(display_tasks) - 1:
-                cursor += 1
-                t = display_tasks[cursor]
-                detail_task = task_get(t.get("id"))
-
-        elif key == "d":
-            if display_tasks and cursor < len(display_tasks):
-                t = display_tasks[cursor]
-                task_done(t.get("id"))
+                task_delete(t.get("id"))
                 tasks = task_list(status="pending", limit=50)
                 display_tasks = tasks
                 if search_query:
@@ -427,6 +428,68 @@ def run():
                     ]
                 if cursor >= len(display_tasks):
                     cursor = max(0, len(display_tasks) - 1)
+            pending_key = ""
+
+        elif key == "d":
+            pending_key = "d"
+
+        elif key == "D":
+            if display_tasks and cursor < len(display_tasks):
+                t = display_tasks[cursor]
+                task_delete(t.get("id"))
+                tasks = task_list(status="pending", limit=50)
+                display_tasks = tasks
+                if search_query:
+                    q = search_query.lower()
+                    display_tasks = [
+                        t for t in tasks if q in t.get("description", "").lower()
+                    ]
+                if cursor >= len(display_tasks):
+                    cursor = max(0, len(display_tasks) - 1)
+            pending_key = ""
+
+        elif key in ("\n", "ENTER"):
+            if display_tasks and cursor < len(display_tasks):
+                t = display_tasks[cursor]
+                detail_task = task_get(t.get("id"))
+                show_detail = True
+                show_help = False
+            pending_key = ""
+
+        elif key == "h" and show_detail:
+            if cursor > 0:
+                cursor -= 1
+                t = display_tasks[cursor]
+                detail_task = task_get(t.get("id"))
+            pending_key = ""
+
+        elif key == "l" and show_detail:
+            if cursor < len(display_tasks) - 1:
+                cursor += 1
+                t = display_tasks[cursor]
+                detail_task = task_get(t.get("id"))
+            pending_key = ""
+
+        elif key == "v":
+            if display_tasks and cursor < len(display_tasks):
+                t = display_tasks[cursor]
+                detail_task = task_get(t.get("id"))
+                show_detail = True
+                show_help = False
+            pending_key = ""
+
+        elif key == "e":
+            if display_tasks and cursor < len(display_tasks):
+                t = display_tasks[cursor]
+                os.system(f"task {t.get('id')} edit")
+                tasks = task_list(status="pending", limit=50)
+                display_tasks = tasks
+                if search_query:
+                    q = search_query.lower()
+                    display_tasks = [
+                        t for t in tasks if q in t.get("description", "").lower()
+                    ]
+            pending_key = ""
 
         elif key == "/":
             sys.stdout.write("  \033[90msearch: \033[0m")
@@ -434,10 +497,32 @@ def run():
             search_query = input().strip()
             cursor = 0
             show_detail = False
+            pending_key = ""
 
         elif key == "a":
             sys.stdout.write("  \033[90madd task: \033[0m")
             sys.stdout.flush()
+            new_task = input().strip()
+            if new_task:
+                task_add(description=new_task)
+                tasks = task_list(status="pending", limit=50)
+                display_tasks = tasks
+                if search_query:
+                    q = search_query.lower()
+                    display_tasks = [
+                        t for t in tasks if q in t.get("description", "").lower()
+                    ]
+            pending_key = ""
+
+        elif key == "r":
+            search_query = ""
+            pending_key = ""
+
+        elif key in ("q", "Q"):
+            break
+
+        else:
+            pending_key = ""
             new_task = input().strip()
             if new_task:
                 task_add(description=new_task)
