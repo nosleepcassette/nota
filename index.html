@@ -1,0 +1,512 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><link rel=icon href=/images/favicon.ico><title>Taskwarrior - task.1 for task-3.4.2 - Taskwarrior</title>
+<link rel=stylesheet href=/css/highlight/default.css><link rel=stylesheet href=/css/bootstrap.min.css><link rel=stylesheet href=/css/theme.css><link rel=stylesheet href=/css/multiselect.css><link rel=stylesheet href=/css/bootstrap-icons/bootstrap-icons.min.css></head><body role=document><nav class="navbar navbar-expand-md bg-body-secondary fixed-top" data-bs-theme=dark><div class=container><a class=navbar-brand href=/>Taskwarrior</a>
+<button type=button class=navbar-toggler data-bs-toggle=collapse data-bs-target=#navbar aria-expanded=false aria-controls=navbar aria-label="Toggle navigation">
+<span class=navbar-toggler-icon></span></button><div id=navbar class="navbar-collapse collapse"><ul class="navbar-nav ms-3"><li class=nav-item><a class=nav-link href=/news/>News</a></li><li class=nav-item><a class=nav-link href=/docs/>Docs</a></li><li class=nav-item><a class=nav-link href=/download/>Download</a></li><li class=nav-item><a class=nav-link href=/support/>Support</a></li><li class=nav-item><a class=nav-link href=/tools/>Tools</a></li></ul></div></div></nav><main role=main><div class=container><div class=row><div class="col-lg-8 doc-main"><article><section><h1 id=name>NAME</h1><p>task - A command line todo manager.</p><h1 id=synopsis>SYNOPSIS</h1><p><strong>task &lt;filter> &lt;command> [ &lt;mods> | &lt;args>
+]</strong><br><strong>task &ndash;version</strong></p><h1 id=description>DESCRIPTION</h1><p>Taskwarrior is a command line todo list manager. It maintains a list of
+tasks that you want to do, allowing you to add/remove, and otherwise
+manipulate them. Taskwarrior has a rich set of subcommands that allow
+you to do various things with it.</p><p>At the core, Taskwarrior is a list processing program. You add text and
+additional related parameters and redisplay the information in a nice
+way. It turns into a todo list program when you add due dates and
+recurrence. It turns into an organized todo list program when you add
+priorities, tags (one word descriptors), project groups, etc.</p><h1 id=filter>FILTER</h1><p>The &lt;filter> consists of zero or more search criteria that select
+tasks. For example, to list all pending tasks belonging to the &lsquo;Home&rsquo;
+project:</p><pre><code>  task project:Home list
+</code></pre><p>You can specify multiple filter terms, each of which further restricts
+the result:</p><pre><code>  task project:Home +weekend garden list
+</code></pre><p>This example applies three filters: the &lsquo;Home&rsquo; project, the &lsquo;weekend&rsquo;
+tag, and the description or annotations must contain the character
+sequence &lsquo;garden&rsquo;. In this example, &lsquo;garden&rsquo; is translated internally
+to:</p><pre><code>  description.contains:garden
+</code></pre><p>as a convenient shortcut. The &lsquo;contains&rsquo; here is an attribute modifier,
+which is used to exert more control over the filter than simply absence
+or presence. See the section &lsquo;ATTRIBUTE MODIFIERS&rsquo; below for a complete
+list of modifiers.</p><p>Note that a filter may have zero terms, which means that all tasks apply
+to the command. This can be dangerous, and this special case is
+confirmed, and cannot be overridden. For example, this command:</p><pre><code>  task modify +work
+  This command has no filter, and will modify all tasks.  Are you sure? (yes/no)
+</code></pre><p>will add the &lsquo;work&rsquo; tag to all tasks, but only after confirmation.</p><p>More filter examples:</p><pre><code>  task                                      &lt;command&gt; &lt;mods&gt;
+  task 28                                   &lt;command&gt; &lt;mods&gt;
+  task +weekend                             &lt;command&gt; &lt;mods&gt;
+  task +bills due.by:eom                    &lt;command&gt; &lt;mods&gt;
+  task project:Home due.before:today        &lt;command&gt; &lt;mods&gt;
+  task ebeeab00-ccf8-464b-8b58-f7f2d606edfb &lt;command&gt; &lt;mods&gt;
+</code></pre><p>By default filter elements are combined with an implicit &lsquo;and&rsquo; operator,
+but &lsquo;or&rsquo; and &lsquo;xor&rsquo; may also be used, provided parentheses are included:</p><pre><code>  task '( /[Cc]at|[Dd]og/ or /[0-9]+/ )'      &lt;command&gt; &lt;mods&gt;
+</code></pre><p>The parentheses isolate the logical term from any default command filter
+or implicit report filter which would be combined with an implicit
+&lsquo;and&rsquo;.</p><p>A filter may target specific tasks using ID or UUID numbers. To specify
+multiple tasks use one of these forms (space-separated list of ID
+numbers, UUID numbers or ID ranges):</p><pre><code>  task 1 2 3                                    delete
+  task 1-3                                      info
+  task 1 2-5 19                                 modify pri:H
+  task 4-7 ebeeab00-ccf8-464b-8b58-f7f2d606edfb info
+</code></pre><p>Note that it may be necessary to properly escape special characters as
+well as quotes in order to avoid their special meanings in the shell.
+See also the section &lsquo;SPECIFYING DESCRIPTIONS&rsquo; for more information.</p><h1 id=modifications>MODIFICATIONS</h1><p>The &lt;mods> consist of zero or more changes to apply to the
+selected tasks, such as:</p><pre><code>  task &lt;filter&gt; &lt;command&gt; project:Home
+  task &lt;filter&gt; &lt;command&gt; +weekend +garden due:tomorrow
+  task &lt;filter&gt; &lt;command&gt; Description/annotation text
+  task &lt;filter&gt; &lt;command&gt; /from/to/     &lt;- replace first match
+  task &lt;filter&gt; &lt;command&gt; /from/to/g    &lt;- replace all matches
+</code></pre><h1 id=subcommands>SUBCOMMANDS</h1><p>Taskwarrior supports different kinds of commands. There are read
+commands, write commands, miscellaneous commands and script helper
+commands. Read commands do not allow modification of tasks. Write
+commands can alter almost any aspect of a task. Script helper commands
+are provided to help you write add-on scripts, for example, shell
+completion (only minimal output is generated, as with verbose=nothing).
+Those commands which are explicitly affected by the <em>context</em> are
+denoted as such.</p><h1 id=read-subcommands>READ SUBCOMMANDS</h1><p>Reports are read subcommands. There are several reports currently
+predefined in Taskwarrior. The output and sort behavior of these reports
+can be configured in the configuration file. See also the man page
+taskrc(5). There are also other read subcommands that are not reports.</p><p><strong>task &ndash;version</strong><br>This is the only conventional command line argument that Taskwarrior
+supports, and is intended for add-on scripts to verify the version
+number of an installed Taskwarrior without invoking the mechanisms that
+create default files.</p><p><strong>task &lt;filter></strong><br>With no command specified, the default command is run, and the filter
+applied.</p><p><strong>task &lt;filter> active</strong><br>Shows all tasks matching the filter that are started but not completed.</p><p><strong>task &lt;filter> all</strong><br>Shows all tasks matching the filter, including parents of recurring
+tasks.</p><p><strong>task &lt;filter> blocked</strong><br>Shows all tasks matching the filter, that are currently blocked by other
+tasks.</p><p><strong>task &lt;filter> blocking</strong><br>Shows all tasks matching the filter, that block other tasks.</p><p><strong>task &lt;filter> burndown.daily</strong><br>Shows a graphical burndown chart, by day. Is affected by the context.</p><p><strong>task &lt;filter> burndown.weekly</strong><br>Shows a graphical burndown chart, by week. Note that &lsquo;burndown&rsquo; is an
+alias to the &lsquo;burndown.weekly&rsquo; report. Is affected by the context.</p><p><strong>task &lt;filter> burndown.monthly</strong><br>Shows a graphical burndown chart, by month. Is affected by the context.</p><p><strong>task calendar [due|&lt;month> &lt;year>|&lt;year>] [y]</strong><br>Shows a monthly calendar with due tasks marked. Shows one horizontal
+line of months. If the &lsquo;y&rsquo; argument is provided, will show at least one
+complete year. If a year is provided, such as &lsquo;2015&rsquo;, then that full
+year is shown. If both a month and a year are specified (&lsquo;6 2015&rsquo;) then
+the months displayed begin at the specified month and year. If the &lsquo;due&rsquo;
+argument is provided, will show the starting month of the earliest due
+task.</p><p><strong>task colors [&lt;sample> | legend]</strong><br>Displays all possible colors, a named sample, or a legend containing all
+currently defined colors.</p><p><strong>task columns [&lt;substring>]</strong><br>Displays all supported columns and formatting styles. Useful when
+creating custom reports. If a substring is provided, only matching
+column names are shown.</p><p><strong>task commands</strong><br>Shows all the supported commands, with some details of each.</p><p><strong>task &lt;filter> completed</strong><br>Shows all tasks matching the filter that are completed.</p><p><strong>task &lt;filter> count</strong><br>Displays only a count of tasks matching the filter. Is affected by the
+context.</p><p><strong>task &lt;filter> export</strong><br>Exports all tasks in the JSON format. Redirect the output to a file, if
+you wish to save it, or pipe it to another command or script to convert
+it to another format. You&rsquo;ll find these example scripts online at
+&lt;https://taskwarrior.org/tools/>:</p><pre><code>  export-csv.pl
+  export-sql.py
+  export-xml.py
+  export-yaml.pl
+  export-html.pl
+  export-tsv.pl
+  export-xml.rb
+  export-ical.pl
+  export-xml.pl
+  export-yad.pl
+</code></pre><p><strong>task &lt;filter> ghistory.annual</strong><br>Shows a graphical report of task status by year.</p><p><strong>task &lt;filter> ghistory.monthly</strong><br>Shows a graphical report of task status by month. Note that &lsquo;ghistory&rsquo;
+is an alias to &lsquo;ghistory.monthly&rsquo;.</p><p><strong>task &lt;filter> ghistory.weekly</strong><br>Shows a graphical report of task status by week.</p><p><strong>task &lt;filter> ghistory.daily</strong><br>Shows a graphical report of task status by day.</p><p><strong>task help</strong><br>Shows the long usage text.</p><p><strong>task &lt;filter> history.annual</strong><br>Shows a report of task history by year. Is affected by the context.</p><p><strong>task &lt;filter> history.monthly</strong><br>Shows a report of task history by month. Note that &lsquo;history&rsquo; is an alias
+to &lsquo;history.monthly&rsquo;. Is affected by the context.</p><p><strong>task &lt;filter> history.weekly</strong><br>Shows a report of task history by week. Is affected by the context.</p><p><strong>task &lt;filter> history.daily</strong><br>Shows a report of task history by day. Is affected by the context.</p><p><strong>task &lt;filter> ids</strong><br>Applies the filter then extracts only the task IDs and presents them as
+a space-separated list. This is useful as input to a task command, to
+achieve this:</p><pre><code>  task $(task project:Home ids) modify priority:H
+</code></pre><p>This example first gets the IDs for the project:Home filter, then sets
+the priority to H for each of those tasks. This can also be achieved
+directly:</p><pre><code>  task project:Home modify priority:H
+</code></pre><p>This command is mainly of use to external scripts.</p><p><strong>task &lt;filter> uuids</strong><br>Applies the filter on all tasks (even deleted and completed tasks) then
+extracts only the task UUIDs and presents them as a space-separated
+list. This is useful as input to a task command, to achieve this:</p><pre><code>  task $(task project:Home status:completed uuids) modify status:pending
+</code></pre><p>This example first gets the UUIDs for the project:Home and
+status:completed filters, then makes each of those tasks pending again.</p><p>This command is mainly of use to external scripts.</p><p><strong>task udas</strong><br>Shows a list of UDAs that are defined, including their name, type, label
+and allowed values. Also shows UDA usage and any orphan UDAs.</p><p><strong>task &lt;filter> information</strong><br>Shows all data and metadata for the specified tasks. This is the only
+means of displaying all aspects of a given task, including the change
+history.</p><p><strong>task &lt;filter> list</strong><br>Provides a standard listing of tasks matching the filter.</p><p><strong>task &lt;filter> long</strong><br>Provides the most detailed listing of tasks matching the filter.</p><p><strong>task &lt;filter> ls</strong><br>Provides a short listing of tasks matching the filter.</p><p><strong>task &lt;filter> minimal</strong><br>Provides a minimal listing of tasks matching the filter.</p><p><strong>task &lt;filter> newest</strong><br>Shows the newest tasks matching the filter.</p><p><strong>task &lt;filter> next</strong><br>Shows a page of the most urgent tasks, sorted by urgency, which is a
+calculated value.</p><p><strong>task &lt;filter> ready</strong><br>Shows a page of the most urgent ready tasks, sorted by urgency with
+started tasks first. A ready task is one that is either unscheduled, or
+has a scheduled date that is past and is not waiting.</p><p><strong>task &lt;filter> oldest</strong><br>Shows the oldest tasks matching the filter.</p><p><strong>task &lt;filter> overdue</strong><br>Shows all incomplete tasks matching the filter that are beyond their due
+date.</p><p><strong>task &lt;filter> projects</strong><br>Lists all project names that are currently used by pending tasks, and
+the number of tasks for each. Is affected by the context.</p><p><strong>task &lt;filter> recurring</strong><br>Shows all recurring tasks matching the filter.</p><p><strong>task &lt;filter> unblocked</strong><br>Shows all tasks that are not currently blocked by other tasks, matching
+the filter.</p><p><strong>task &lt;filter> waiting</strong><br>Shows all waiting tasks matching the filter.</p><h1 id=write-subcommands>WRITE SUBCOMMANDS</h1><p><strong>task add &lt;mods></strong><br>Adds a new pending task to the task list. It is affected by the
+currently set context.</p><p><strong>task &lt;filter> annotate &lt;mods></strong><br>Adds an annotation to an existing task.</p><p><strong>task &lt;filter> append &lt;mods></strong><br>Appends description text to an existing task.</p><p><strong>task &lt;filter> delete &lt;mods></strong><br>Deletes the specified task from task list. Is affected by the context.</p><p><strong>task &lt;filter> denotate &lt;mods></strong><br>Deletes an annotation for the specified task. If the provided
+description matches an annotation exactly, the corresponding annotation
+is deleted. If the provided description matches annotations partly, the
+first partly matched annotation is deleted. Is affected by the context.</p><p><strong>task &lt;filter> done &lt;mods></strong><br>Marks the specified task as done. Is affected by the context.</p><p><strong>task &lt;filter> duplicate &lt;mods></strong><br>Duplicates the specified task and allows modifications. Is affected by
+the context.</p><p><strong>task &lt;filter> edit</strong><br>Launches a text editor to let you modify all aspects of a task directly.
+In general, this is not the recommended method of modifying tasks, but
+is provided for exceptional circumstances. Use carefully. Is affected by
+the context.</p><p><strong>task import [&lt;file> &mldr;]</strong><br>Imports tasks in the JSON format. Can be used to add new tasks, or
+update existing ones. Tasks are identified by their UUID.</p><p>If no file or &ldquo;-&rdquo; is specified, import tasks from STDIN.</p><p>Setting rc.recurrence.confirmation to an appropriate level is
+recommended if import is to be used in automated workflows. See
+taskrc(5).</p><p>For importing other file formats, the standard task release comes with a
+few example scripts, such as:</p><pre><code>  import-todo.sh.pl
+  import-yaml.pl
+</code></pre><p><strong>task import-v2</strong><br>Imports tasks from the Taskwarrior v2.x format. This is used when
+upgrading from version 2.x to version 3.x.</p><p><strong>task log &lt;mods></strong><br>Adds a new task that is already completed, to the task list. It is
+affected by the currently set context.</p><p><strong>task &lt;filter> modify &lt;mods></strong><br>Modifies the existing task with provided information.</p><p><strong>task &lt;filter> prepend &lt;mods></strong><br>Prepends description text to an existing task. Is affected by the
+context.</p><p><strong>task &lt;filter> purge</strong><br>Permanently removes the specified tasks from the data files. Only tasks
+that are already deleted can be purged. This command has a local-only
+effect and changes introduced by it are not synced. Is affected by the
+context.</p><p>Warning: causes permanent, non-revertible loss of data.</p><p><strong>task &lt;filter> start &lt;mods></strong><br>Marks the specified tasks as started. Is affected by the context.</p><p><strong>task &lt;filter> stop &lt;mods></strong><br>Removes the <em>start</em> time from the specified task. Is affected by the
+context.</p><h1 id=miscellaneous-subcommands>MISCELLANEOUS SUBCOMMANDS</h1><p>Miscellaneous subcommands either accept no command line arguments, or
+accept non-standard arguments.</p><p><strong>task calc &lt;expression></strong><br>Evaluates an algebraic expression. Can be used to test how Taskwarrior
+parses and evaluates the expression given on the command line.</p><p>Examples:</p><pre><code>    task calc 1 + 1
+    2
+
+    task calc now + 8d
+    2015-03-26T18:06:57
+
+    task calc eom
+    2015-03-31T23:59:59
+</code></pre><p><strong>task config [&lt;name> [&lt;value> | &lsquo;&rsquo;]]</strong><br>Add, modify and remove settings directly in the Taskwarrior
+configuration. This command either modifies the &rsquo;name&rsquo; setting with a
+new value of &lsquo;value&rsquo;, or adds a new entry that is equivalent to
+&rsquo;name=value&rsquo;:</p><pre><code>    task config name value
+</code></pre><p>This command sets a blank value. This has the effect of suppressing any
+default value:</p><pre><code>    task config name ''
+</code></pre><p>Finally, this command removes any &rsquo;name=&mldr;&rsquo; entry from the .taskrc
+file:</p><pre><code>    task config name
+</code></pre><p><strong>task context &lt;name></strong><br>Sets the currently active context. See the CONTEXT section.</p><p>Example:</p><pre><code>    task context work
+</code></pre><p><strong>task context delete &lt;name></strong><br>Deletes the context with the name &lt;name>. If the context being
+deleted is currently set as active, it will be unset.</p><p>Example:</p><pre><code>    task context delete work
+</code></pre><p><strong>task context define &lt;name> &lt;filter></strong><br>Defines a new context with name &lt;name> and definition
+&lt;filter>. This command does not affect the currently set context,
+just adds a new context definition.</p><p>Examples:</p><pre><code>    task context define work project:Work
+    task context define home project:Home or +home
+    task context define superurgent due:today and +urgent
+</code></pre><p><strong>task context list</strong><br>Outputs a list of available contexts along with their definitions.</p><p><strong>task context none</strong><br>Clears the currently active context, if any was set.</p><p><strong>task context show</strong><br>Shows the currently active context, along with its definition.</p><p><strong>task diagnostics</strong><br>Shows diagnostic information, of the kind needed when reporting a
+problem. When you report a bug, it is likely that the platform, version,
+and environment are important. Running this command generates a summary
+of similar information that should accompany a bug report.</p><p>It includes compiler, library and software information. It does not
+include any personal information, other than the location of your task
+data.</p><p>This command also performs a diagnostic scan of your data looking for
+common problems, such as duplicate UUIDs.</p><p><strong>task execute &lt;external command></strong><br>Executes the specified command. Not useful by itself, but when used in
+conjunction with aliases and extensions can provide seamless
+integration.</p><p><strong>task logo</strong><br>Displays the Taskwarrior logo.</p><p><strong>task news</strong><br>Guides the user through important release notes anytime a new version of
+Taskwarrior is installed. It provides personalized feedback, deprecation
+warnings and usage advice, where applicable.</p><p><strong>task reports</strong><br>Lists all supported reports. This includes the built-in reports, and any
+custom reports you have defined.</p><p><strong>task show [all | &lt;substring>]</strong><br>Shows all the current settings. If a substring is specified just the
+settings containing that substring will be displayed.</p><p><strong>task &lt;filter> stats</strong><br>Shows statistics of the tasks defined by the filter. Is affected by the
+context.</p><p><strong>task &lt;filter> summary</strong><br>Shows a report of aggregated task status by project. Is affected by the
+context.</p><p><strong>task sync</strong><br>The sync command synchronizes data with the Taskserver, if configured.</p><p>Note: If you use multiple sync clients, make sure this setting (which is
+the default) is on your primary client:</p><pre><code>  recurrence=on
+</code></pre><p>and on all other clients (this is not the default):</p><pre><code>  recurrence=off
+</code></pre><p>This is a workaround to avoid a recurrence bug that duplicates recurring
+tasks.</p><p><strong>task &lt;filter> tags</strong><br>Show a list of all tags used. Any special tags used are highlighted.
+Note that virtual tags are not listed - they don&rsquo;t really exist, and are
+just a convenient notation for other task metadata. It is an error to
+attempt to add or remove a virtual tag. Is affected by the context.</p><p><strong>task timesheet [&lt;weeks>]</strong><br>Shows a weekly report of tasks completed and started.</p><p><strong>task undo</strong><br>Reverts the most recent action. Obeys the confirmation setting.</p><p><strong>task version</strong><br>Shows the Taskwarrior version number.</p><h1 id=helper-subcommands>HELPER SUBCOMMANDS</h1><p><strong>task _aliases</strong><br>Generates a list of all aliases, for autocompletion purposes.</p><p><strong>task _columns</strong><br>Displays only a list of supported columns.</p><p><strong>task _commands</strong><br>Generates a list of all commands, for autocompletion purposes.</p><p><strong>task _config</strong><br>Lists all supported configuration variables, for completion purposes.</p><p><strong>task _context</strong><br>Lists all available context variables, for completion purposes.</p><p><strong>task &lt;filter> _ids</strong><br>Shows only the IDs of matching tasks, in the form of a list. Deprecated
+in favor of _unique.</p><p><strong>task _show</strong><br>Shows the combined defaults and overrides of the configuration settings,
+for use by third-party applications.</p><p><strong>task &lt;filter> _unique &lt;attribute></strong><br>Reports a unique set of attribute values. For example, to see all the
+active projects:</p><pre><code>  task +PENDING _unique project
+</code></pre><p><strong>task &lt;filter> _uuids</strong><br>Shows only the UUIDs of matching tasks among all tasks (even deleted and
+completed tasks), in the form of a list. Deprecated in favor of
+_unique.</p><p><strong>task _udas</strong><br>Shows only defined UDA names, in the form of a list.</p><p><strong>task &lt;filter> _projects</strong><br>Shows only a list of all project names used. Deprecated in favor of
+_unique.</p><p><strong>task &lt;filter> _tags</strong><br>Shows only a list of all tags used, for autocompletion purposes.
+Deprecated in favor of _unique.</p><p><strong>task &lt;filter> _urgency</strong><br>Displays the urgency measure of a task.</p><p><strong>task _version</strong><br>Shows only the Taskwarrior version number.</p><p><strong>task _zshcommands</strong><br>Generates a list of all commands, for zsh autocompletion purposes.</p><p><strong>task &lt;filter> _zshids</strong><br>Shows the IDs and descriptions of matching tasks.</p><p><strong>task &lt;filter> _zshuuids</strong><br>Shows the UUIDs and descriptions of matching tasks.</p><p><strong>task _get &lt;DOM> [&lt;DOM> &mldr;]</strong><br>Accesses and displays the DOM reference(s). Used to extract individual
+values from tasks, or the system. Supported DOM references are:</p><pre><code>  rc.&lt;name&gt;
+  tw.syncneeded
+  tw.program
+  tw.args
+  tw.width
+  tw.height
+  tw.version
+  context.program    (Deprecated in 2.6.0)
+  context.args       (Deprecated in 2.6.0)
+  context.width      (Deprecated in 2.6.0)
+  context.height     (Deprecated in 2.6.0)
+  system.version
+  system.os
+  &lt;id&gt;.&lt;attribute&gt;
+  &lt;uuid&gt;.&lt;attribute&gt;
+</code></pre><p>Note that the &lsquo;rc.&lt;name>&rsquo; reference may need to be escaped using
+&lsquo;&ndash;&rsquo; to prevent the reference from being interpreted as an override.</p><p>Note that if the DOM reference is not valid, or the reference evaluates
+to a missing value, the command exits with 1.</p><p>Additionally, some components of the attributes of particular types may
+be extracted by DOM references.</p><pre><code>  $ task _get 2.due.year
+  2015
+</code></pre><p>For a full list of supported attribute-specific DOM references, consult
+the online documentation at:
+&lt;https://taskwarrior.org/docs/dom.html></p><h1 id=attributes-and-metadata>ATTRIBUTES AND METADATA</h1><p><strong>ID</strong><br>Tasks can be specified uniquely by IDs, which are the indexes of the
+&ldquo;working set&rdquo; of tasks (mostly pending and recurrent tasks). The ID of a
+task may therefore change, but only when a report that displays IDs is
+run. When modifying tasks, it is safe to rely on the last displayed ID.
+Always run a report to check you have the right ID for a task. IDs can
+be given to task as a sequence, for example:</p><pre><code>task 1,4-10,19 delete
+</code></pre><p><strong>+tag|-tag</strong><br>Tags are arbitrary words associated with a task. Use + to add a tag
+and - to remove a tag from a task. A task can have any quantity of tags.</p><p>Certain tags (called &lsquo;special tags&rsquo;), can be used to affect the way
+tasks are treated. For example, if a task has the special tag &rsquo;nocolor&rsquo;,
+then it is exempt from all color rules. The supported special tags are:</p><pre><code>    +nocolor     Disable color rules processing for this task
+    +nonag       Completion of this task suppresses all nag messages
+    +nocal       This task will not appear on the calendar
+    +next        Elevates task so it appears on 'next' report
+</code></pre><p>There are also virtual tags, which represent task metadata in tag form.
+These tags do not exist, but can be used to filter tasks. The supported
+virtual tags are:</p><pre><code>    ACTIVE       Matches if the task is started
+    ANNOTATED    Matches if the task has annotations
+    BLOCKED      Matches if the task is blocked
+    BLOCKING     Matches if the task is blocking
+    CHILD        Matches if the task has a parent (deprecated in 2.6.0)
+    COMPLETED    Matches if the task has completed status
+    DELETED      Matches if the task has deleted status
+    DUE          Matches if the task is due within the next 7 days (See rc.due)
+    INSTANCE     Matches if the task is a recurrent instance
+    LATEST       Matches if the task is the newest added task
+    MONTH        Matches if the task is due this month
+    ORPHAN       Matches if the task has any orphaned UDA values
+    OVERDUE      Matches if the task is overdue
+    PARENT       Matches if the task is a parent (deprecated in 2.6.0)
+    PENDING      Matches if the task has pending status
+    PRIORITY     Matches if the task has a priority
+    PROJECT      Matches if the task has a project
+    QUARTER      Matches if the task is due this quarter
+    READY        Matches if the task is actionable
+    SCHEDULED    Matches if the task is scheduled
+    TAGGED       Matches if the task has tags
+    TEMPLATE     Matches if the task is a recurrence template
+    TODAY        Matches if the task is due today
+    TOMORROW     Matches if the task is due sometime tomorrow
+    UDA          Matches if the task has any UDA values
+    UNBLOCKED    Matches if the task is not blocked
+    UNTIL        Matches if the task expires
+    WAITING      Matches if the task is waiting
+    WEEK         Matches if the task is due this week
+    YEAR         Matches if the task is due this year
+    YESTERDAY    Matches if the task was due sometime yesterday
+</code></pre><p>You can use +BLOCKED to filter blocked tasks, or -BLOCKED for unblocked
+tasks. Similarly, -BLOCKED is equivalent to +UNBLOCKED. It is an error
+to attempt to add or remove a virtual tag.</p><p><strong>project:&lt;project-name></strong><br>Specifies the project to which a task is related to.</p><p><strong>status:pending|deleted|completed|waiting|recurring</strong><br>Specifies the state of the task.</p><p><strong>priority:H|M|L or priority:</strong><br>Specifies High, Medium, Low and no priority for a task.</p><p><strong>due:&lt;due-date></strong><br>Specifies the due-date of a task.</p><p><strong>recur:&lt;frequency></strong><br>Specifies the frequency of a recurrence of a task.</p><p><strong>scheduled:&lt;ready-date></strong><br>Specifies the date after which a task can be accomplished.</p><p><strong>until:&lt;expiration date of task></strong><br>Specifies the expiration date of a task, after which it will be deleted.</p><p><strong>limit:&lt;number-of-rows></strong><br>Specifies the desired number of tasks a report should show, if a
+positive integer is given. The value &lsquo;page&rsquo; may also be used, and will
+limit the report output to as many lines of text as will fit on screen.
+This defaults to 25 lines.</p><p><strong>wait:&lt;wait-date></strong><br>When a task is given a wait date, it is hidden from most built-in
+reports, which exclude +WAITING. When the date is in the past, the task
+is not considered +WAITING, and again becomes visible. Note that, for
+compatibilty, such tasks are shown as having status &ldquo;waiting&rdquo;, but this
+will change in a future release.</p><p><strong>depends:&lt;id1,id2 &mldr;></strong><br>Declares this task to be dependent on id1 and id2. This means that the
+tasks id1 and id2 should be completed before this task. Consequently,
+this task will then show up on the &lsquo;blocked&rsquo; report. It accepts a
+comma-separated list of ID numbers, UUID numbers and ID ranges. When
+prefixing any element of this list by &lsquo;-&rsquo;, the specified tasks are
+removed from the dependency list.</p><p><strong>entry:&lt;entry-date></strong><br>For report purposes, specifies the date that a task was created.</p><p><strong>modified:&lt;modified-date></strong><br>Specifies the most recent modification date.</p><h1 id=attribute-modifiers>ATTRIBUTE MODIFIERS</h1><p>Attribute modifiers improve filters. Supported modifiers are:</p><blockquote><p><strong>before (synonyms under, below)</strong><br><strong>after (synonyms over, above)</strong><br><strong>by</strong><br><strong>none</strong><br><strong>any</strong><br><strong>is (synonym equals)</strong><br><strong>isnt (synonym not)</strong><br><strong>has (synonym contains)</strong><br><strong>hasnt</strong><br><strong>startswith (synonym left)</strong><br><strong>endswith (synonym right)</strong><br><strong>word</strong><br><strong>noword</strong></p></blockquote><p>They can be applied to all regular attributes (see above) and the
+following calculated attributes:</p><blockquote><p><strong>urgency</strong> (or short <strong>urg</strong>)</p></blockquote><p>For example:</p><pre><code>    task due.before:eom priority.not:L list
+</code></pre><p>The <em>before</em> modifier is used to compare values, preserving semantics,
+so project.before:B list all projects that begin with &lsquo;A&rsquo;. Priority &lsquo;L&rsquo;
+is before &lsquo;M&rsquo;, and due:2011-01-01 is before due:2011-01-02. The synonyms
+&lsquo;under&rsquo; and &lsquo;below&rsquo; are included to allow filters that read more
+naturally.</p><p>The <em>after</em> modifier is the inverse of the <em>before</em> modifier.</p><p>The <em>by</em> modifier is the same as &lsquo;before&rsquo;, except it also includes the
+moment in question. For example:</p><pre><code>    task add test due:eoy
+</code></pre><p>will be found when using the inclusive filter &lsquo;by&rsquo;:</p><pre><code>    task due.by:eoy
+</code></pre><p>but not when the non-inclusive filter &lsquo;before&rsquo; is used:</p><pre><code>    task due.before:eoy
+</code></pre><p>this applies equally to other named dates such as &rsquo;eom&rsquo;, &rsquo;eod&rsquo;, etc; the
+modifier compares using &lsquo;&lt;=&rsquo; rather than &lsquo;&lt;&rsquo; like &lsquo;before&rsquo; does.</p><p>The <em>none</em> modifier requires that the attribute does not have a value.
+For example:</p><pre><code>    task priority:      list
+    task priority.none: list
+</code></pre><p>are equivalent, and list tasks that do not have a priority.</p><p>The <em>any</em> modifier requires that the attribute has a value, but any
+value will suffice.</p><p>The <em>is</em> modifier requires an exact match with the value.</p><p>The <em>isnt</em> modifier is the inverse of the <em>is</em> modifier.</p><p>The <em>has</em> modifier is used to search for a substring, such as:</p><pre><code>    task description.has:foo list
+    task foo                 list
+</code></pre><p>These are equivalent and will return any task that has &lsquo;foo&rsquo; in the
+description or annotations.</p><p>The <em>hasnt</em> modifier is the inverse of the <em>has</em> modifier.</p><p>The <em>startswith</em> modifier matches against the left, or beginning of an
+attribute, such that:</p><pre><code>    task project.startswith:H list
+    task project:H            list
+</code></pre><p>are equivalent and will match any project starting with &lsquo;H&rsquo;. Matching
+all projects not starting with &lsquo;H&rsquo; is done with:</p><pre><code>    task project.not:H         list
+</code></pre><p>The <em>endswith</em> modifier matches against the right, or end of an
+attribute.</p><p>The <em>word</em> modifier requires that the attribute contain the whole word
+specified, such that this:</p><pre><code>    task description.word:foo list
+</code></pre><p>Will match the description &lsquo;foo bar baz&rsquo; but does not match &lsquo;dog food&rsquo;.</p><p>The <em>noword</em> modifier is the inverse of the <em>word</em> modifier.</p><h1 id=expressions-and-operators>EXPRESSIONS AND OPERATORS</h1><p>You can use the following operators in filter expressions:</p><pre><code>  and  or  xor  !               Logical operators
+  &lt;  &lt;=  =  ==  !=  !==  &gt;=  &gt;  Relational operators
+  (  )                          Precedence
+</code></pre><p>For example:</p><pre><code>  task due.before:eom priority.not:L list
+  task '( due &lt; eom or priority != L )' list
+  task '! ( project:Home or project:Garden )' list
+</code></pre><p>The <em>=</em> operator tests for approximate equality. Dates compare equal if
+they are on the same day (hour and minutes are ignored). Strings compare
+equal if the left operand starts with the right operand. The <em>==</em>
+operator tests for exact equality. The <em>!=</em> and <em>!==</em> operators are the
+negation of <em>=</em> and <em>==</em> respectively. The negation operator is <em>!</em>.</p><p>Note that the parentheses are required when using a logical operator
+other than the &lsquo;and&rsquo; operator. The reason is that some reports contain
+filters that must be combined with the command line. Consider this
+example:</p><pre><code>  task project:Home or project:Garden list
+</code></pre><p>While this looks correct, it is not. The &rsquo;list&rsquo; report contains a filter
+of:</p><pre><code>  task show report.list.filter
+
+  Config Variable    Value
+  -----------------  --------------
+  report.list.filter status:pending
+</code></pre><p>Which means the example is really:</p><pre><code>  task status:pending project:Home or project:Garden list
+</code></pre><p>The implied &lsquo;and&rsquo; operator makes it:</p><pre><code>  task status:pending and project:Home or project:Garden list
+</code></pre><p>This is a precedence error - the &lsquo;and&rsquo; and &lsquo;or&rsquo; need to be grouped using
+parentheses, like this:</p><pre><code>  task status:pending and ( project:Home or project:Garden ) list
+</code></pre><p>The original example therefore must be entered as:</p><pre><code>  task '( project:Home or project:Garden )' list
+</code></pre><p>This includes quotes to escape the parentheses, so that the shell
+doesn&rsquo;t interpret them and hide them from Taskwarrior.</p><p>There is redundancy between operators, attribute modifiers and other
+syntactic sugar. For example, the following are all equivalent:</p><pre><code>  task foo                      list
+  task /foo/                    list
+  task description.contains:foo list
+  task description.has:foo      list
+  task 'description ~ foo'      list
+</code></pre><h1 id=specifying-dates-and-frequencies>SPECIFYING DATES AND FREQUENCIES</h1><h2 id=dates>DATES</h2><p>Taskwarrior reads dates from the command line and displays dates in the
+reports. The expected and desired date format is determined by the
+configuration variable <em>dateformat</em></p><blockquote><p>Exact specification</p><pre><code>  task ... due:7/14/2008
+</code></pre><p>ISO-8601</p><pre><code>  task ... due:2013-03-14T22:30:00Z
+</code></pre><p>Relative wording</p><pre><code>  task ... due:now
+  task ... due:today
+  task ... due:yesterday
+  task ... due:tomorrow
+</code></pre><p>Day number with ordinal</p><pre><code>  task ... due:23rd
+  task ... due:3wks
+  task ... due:1day
+  task ... due:9hrs
+</code></pre><p>Start of next (work) week (Monday), calendar week (Sunday or Monday), month, quarter and year</p><pre><code>  task ... due:sow
+  task ... due:soww
+  task ... due:socw
+  task ... due:som
+  task ... due:soq
+  task ... due:soy
+</code></pre><p>End of current (work) week (Friday), calendar week (Saturday or Sunday), month, quarter and year</p><pre><code>  task ... due:eow
+  task ... due:eoww
+  task ... due:eocw
+  task ... due:eom
+  task ... due:eoq
+  task ... due:eoy
+</code></pre><p>At some point or later</p><pre><code>  task ... wait:later
+  task ... wait:someday
+</code></pre><p>This sets the wait date to 12/30/9999.</p><p>Next occurring weekday</p><pre><code>  task ... due:fri
+</code></pre><p>Predictable holidays</p><pre><code>  task ... due:goodfriday
+  task ... due:easter
+  task ... due:eastermonday
+  task ... due:ascension
+  task ... due:pentecost
+  task ... due:midsommar
+  task ... due:midsommarafton
+  task ... due:juhannus
+</code></pre></blockquote><h2 id=frequencies>FREQUENCIES</h2><p>Recurrence periods. Taskwarrior supports several ways of specifying the
+<em>frequency</em> of recurring tasks. Note that frequencies can be
+abbreviated.</p><blockquote><p>daily, day, 1day, 1days, 2day, 2days, 1da, 2da, &mldr;<br>Every day or a number of days.</p><p>weekdays<br>Mondays, Tuesdays, Wednesdays, Thursdays, Fridays and skipping weekend
+days.</p><p>weekly, 1wk, 2wks, &mldr;<br>Every week or a number of weeks.</p><p>biweekly, fortnight<br>Every two weeks.</p><p>monthly, month, 1mo, 2mo, &mldr;<br>Every month.</p><p>quarterly, 1qtr, 2qtrs, &mldr;<br>Every three months, a quarter, or a number of quarters.</p><p>semiannual<br>Every six months.</p><p>annual, yearly, 1yr, 2yrs, &mldr;<br>Every year or a number of years.</p><p>biannual, biyearly, 2yr<br>Every two years.</p></blockquote><h1 id=context>CONTEXT</h1><p>Context is a user-defined query, which is automatically applied to all
+commands that filter the task list and to commands that create new tasks
+(add, log). For example, any report command will have its result
+affected by the current active context. Here is a list of the commands
+that are affected:</p><pre><code>    add
+    burndown
+    count
+    delete
+    denotate
+    done
+    duplicate
+    edit
+    history
+    log
+    prepend
+    projects
+    purge
+    start
+    stats
+    stop
+    summary
+    tags
+</code></pre><p>All other commands are NOT affected by the context.</p><pre><code>    $ task list
+    ID Age Project  Description        Urg
+    1  2d  Sport    Run 5 miles        1.42
+    2  1d  Home     Clean the dishes   1.14
+
+    $ task context home
+    Context 'home' set. Use 'task context none' to remove.
+
+    $ task list
+    ID Age Project  Description        Urg
+    2  1d  Home     Clean the dishes   1.14
+    Context 'home' set. Use 'task context none' to remove.
+</code></pre><p>Task list got automatically filtered for project:Home.</p><pre><code>    $ task add Vaccuum the carpet
+    Created task 3.
+    Context 'home' set. Use 'task context none' to remove.
+
+    $ task list
+    ID Age Project  Description         Urg
+    2  1d  Home     Clean the dishes    1.14
+    3  5s  Home     Vaccuum the carpet  1.14
+    Context 'home' set. Use 'task context none' to remove.
+</code></pre><p>Note that the newly added task &ldquo;Vaccuum the carpet&rdquo; has &ldquo;project:Home&rdquo;
+set automatically.</p><p>As seen in the example above, context is applied by specifying its name
+to the &ldquo;context&rdquo; command. To change the currently applied context, just
+pass the new context&rsquo;s name to the &lsquo;context&rsquo; command.</p><p>To unset any context, use the &rsquo;none&rsquo; subcommand.</p><pre><code>    $ task context none
+    Context unset.
+
+    $ task list
+    ID Age Project  Description         Urg
+    1  2d  Sport    Run 5 miles         1.42
+    2  1d  Home     Clean the dishes    1.14
+    3  7s  Home     Vaccuum the carpet  1.14
+</code></pre><p>Context can be defined using the &lsquo;define&rsquo; subcommand, specifying both
+the name of the new context, and it&rsquo;s assigned filter.</p><pre><code>    $ task context define home project:Home
+    Are you sure you want to add 'context.home.read' with a value of 'project:Home'? (yes/no) yes
+    Are you sure you want to add 'context.home.write' with a value of 'project:Home'? (yes/no) yes
+    Context 'home' successfully defined.
+</code></pre><p>Note that you were separately prompted to set the &lsquo;read&rsquo; and &lsquo;write&rsquo;
+context. This allows you to specify contexts that only work for
+reporting commands or only for commands that create tasks.</p><p>To remove the definition, use the &lsquo;delete&rsquo; subcommand.</p><pre><code>    $ task context delete home
+    Are you sure you want to remove 'context.home.read'? (yes/no) yes
+    Are you sure you want to remove 'context.home.write'? (yes/no) yes
+    Context 'home' deleted.
+</code></pre><p>To check what is the currently active context, use the &lsquo;show&rsquo;
+subcommand.</p><pre><code>    $ task context show
+    Context 'home' with
+
+    * read filter: '+home'
+    * write filter: '+home'
+
+    is currently applied.
+</code></pre><p>Contexts can store arbitrarily complex filters.</p><pre><code>    $ task context define family project:Family or +paul or +nancy
+    Are you sure you want to add 'context.family.read' with a value of 'project:Family or +paul or +nancy'? (yes/no) yes
+    Are you sure you want to add 'context.family.write' with a value of 'project:Family or +paul or +nancy'? (yes/no) no
+    Context 'family' successfully defined.
+</code></pre><p>Contexts are permanent, and the currently set context name is stored in
+the &ldquo;context&rdquo; configuration variable. The context definition is stored
+in the &ldquo;context.&lt;name>.read&rdquo; configuration variable (for reporting
+commands) and &ldquo;context.&lt;name>.write&rdquo; configuration variable (for
+task additions, i.e. task add/log).</p><p>Note that in the example above, the user decided not to define the
+complex filter as writeable context. The reason for this decision is
+that the complex filter in the example does not directly translate to a
+modification. In fact, if such a context is used as a writeable context,
+the following happens:</p><pre><code>    $ task add Call Paul
+    Created task 4.
+    Context 'family' set. Use 'task context none' to remove.
+
+    $ task 4 list
+    ID Age  Project Tags       Description      Urg
+     4 9min Family  nancy paul or or Call Paul    0
+</code></pre><p>There is no clear mapping between the complex filter used and the
+modifications (should only the project be set? only the tags? both?).
+Additionally note the &lsquo;or&rsquo; operators being present in the description.
+Taskwarrior does not try to guess the user intention here, and instead,
+the user is expected to set the &ldquo;context.&lt;name>.write&rdquo; variable to
+make their intention explicit, for example:</p><pre><code>    $ task config context.family.write project:Family
+    Are you sure you want to change the value of 'context.family.write' from 'project:Family or +paul or +nancy' to 'project:Family'? (yes/no) yes
+    Config file /home/tbabej/.config/task/taskrc modified.
+
+    $ task context
+    Name   Type  Definition                        Active
+    family read  project:Family or +paul or +nancy yes
+           write project:Family                    yes
+    home   read  +home                             no
+           write +home                             no
+</code></pre><p>Note how read and write contexts differ for context &ldquo;family&rdquo;, while for
+context &ldquo;home&rdquo; they stay the same.</p><p>In addition, every configuration parameter can be overridden for the
+current context, by specifying
+context.&lt;name>.rc.&lt;parameter>. For example, if the default
+command for the family context should be displaying the family_report:</p><pre><code>    $ task config context.family.rc.default.command family_report
+</code></pre><h1 id=command-abbreviation>COMMAND ABBREVIATION</h1><p>All Taskwarrior commands may be abbreviated as long as a unique prefix
+is used, for example:</p><pre><code>  $ task li
+</code></pre><p>is an unambiguous abbreviation for</p><pre><code>  $ task list
+</code></pre><p>but</p><pre><code>  $ task l
+</code></pre><p>could be list, ls or long.</p><p>Note that you can restrict the minimum abbreviation size using the
+configuration setting:</p><pre><code>  abbreviation.minimum=3
+</code></pre><h1 id=specifying-descriptions>SPECIFYING DESCRIPTIONS</h1><p>Some task descriptions need to be escaped because of the shell and the
+special meaning of some characters to the shell. This can be done either
+by adding quotes to the description or escaping the special character:</p><pre><code>  $ task add &quot;quoted ' quote&quot;
+  $ task add escaped \' quote
+</code></pre><p>The argument &ndash; (a double dash) tells Taskwarrior to treat all other
+args as description:</p><pre><code>  $ task add -- project:Home needs scheduling
+</code></pre><p>In other situations, the shell sees spaces and breaks up arguments. For
+example, this command:</p><pre><code>  $ task 123 modify /from this/to that/
+</code></pre><p>is broken up into several arguments, which is corrected with quotes:</p><pre><code>  $ task 123 modify &quot;/from this/to that/&quot;
+</code></pre><p>It is sometimes necessary to force the shell to pass quotes to
+Taskwarrior intact, so you can use:</p><pre><code>  $ task add project:\'Three Word Project\' description
+</code></pre><p>Taskwarrior supports Unicode using only the UTF8 encoding.</p><h1 id=configuration-file-and-override-options>CONFIGURATION FILE AND OVERRIDE OPTIONS</h1><p>Taskwarrior stores its configuration in a file in the user&rsquo;s home
+directory: ~/.taskrc. The default configuration file can be overridden
+with:</p><p><strong>task rc:&lt;path-to-alternate-file> &mldr;</strong><br>Specifies an alternate configuration file with highest priority.</p><p><strong>TASKRC=&lt;path-to-alternate-file> task ..</strong><br>The environment variable specifies an alternate configuration file to
+use.</p><p><strong>XDG_CONFIG_HOME=&lt;path-to-alternate-config-home> task ..</strong><br>The environment variable specifies an alternate configuration file to
+use.</p><p><strong>task rc.&lt;name>:&lt;value> &mldr;</strong><br><strong>task rc.&lt;name>=&lt;value> &mldr;</strong> Specifies individual
+configuration file overrides.</p><p><strong>TASKDATA=/tmp/.task task &mldr;</strong><br>The environment variable overrides the default, and the &lsquo;data.location&rsquo;
+configuration setting of the task data directory.</p><h1 id=more-examples>MORE EXAMPLES</h1><p>For examples please see the online documentation starting at</p><blockquote><p>&lt;https://taskwarrior.org/docs></p></blockquote><p>Note that the online documentation can be more detailed and more current
+than this man page.</p><h1 id=files>FILES</h1><p><del>/.taskrc<br>User configuration file - see also taskrc(5). Note that this can be
+overridden on the command line or by the TASKRC environment variable.
+Also, if *</del>/.taskrc* doesn&rsquo;t exist and XDG_CONFIG_HOME environment
+variable is defined, taskwarrior will check if
+$XDG_CONFIG_HOME/task/taskrc exists and attempt to read it</p><p>~/.task<br>The default directory where task stores its data. The location can be
+configured in the configuration variable &lsquo;data.location&rsquo;, or overridden
+with the TASKDATA environment variable.</p><p>~/.task/taskchampion.sqlite3<br>The database file.</p><h1 id=credits--copyrights>CREDITS & COPYRIGHTS</h1><p>Copyright (C) 2006 - 2021 T. Babej, P. Beckingham, F. Hernandez.</p><p>Taskwarrior is distributed under the MIT license. See
+<a href=https://www.opensource.org/licenses/mit-license.php>https://www.opensource.org/licenses/mit-license.php</a> for more
+information.</p><h1 id=see-also>SEE ALSO</h1><p><strong>taskrc(5),</strong> <strong>task-color(5),</strong> <strong>task-sync(5)</strong></p><p>For more information regarding Taskwarrior, see the following:</p><p>The official site at<br>&lt;https://taskwarrior.org></p><p>The official code repository at<br>&lt;https://github.com/GothenburgBitFactory/taskwarrior></p><p>You can contact the project by emailing<br>&lt;support@GothenburgBitFactory.org></p><h1 id=reporting-bugs>REPORTING BUGS</h1><p>Bugs in Taskwarrior may be reported to the issue-tracker at<br>&lt;https://github.com/GothenburgBitFactory/taskwarrior/issues></p></section></article></div><div class="col-lg-3 offset-lg-1 doc-sidebar"><div id=sidebar><div class=sidebar-module><div class=sidebar-toc><h4 class=sidebar-heading>Table of Contents</h4><nav id=TableOfContents><ul><li><a href=#dates>DATES</a></li><li><a href=#frequencies>FREQUENCIES</a></li></ul></nav></div></div></div></div></div></div></main><footer class=bg-body-secondary data-bs-theme=dark><div class=container><div class="row justify-content-between"><div class="col-6 col-lg-auto text-muted"><h6>Get Involved</h6><ul class=list-unstyled><li class=mb-1><a class="link-underline link-underline-opacity-0" href=https://github.com/GothenburgBitFactory/taskwarrior/issues><em class="bi bi-github"></em>&ensp;Submit a bug</a></li><li class=mb-1><a class="link-underline link-underline-opacity-0" href=https://github.com/GothenburgBitFactory/taskwarrior><em class="bi bi-github"></em>&ensp;Clone the code</a></li></ul></div><div class="col-6 col-lg-auto text-muted"><h6>Related Sites</h6><ul class=list-unstyled><li class=mb-1><a class="link-underline link-underline-opacity-0 text-break" href=https://gothenburgbitfactory.org>gothenburgbitfactory.org</a></li><li class=mb-1><a class="link-underline link-underline-opacity-0" href=https://holidata.net>holidata.net</a></li><li class=mb-1><a class="link-underline link-underline-opacity-0" href=https://timewarrior.net>timewarrior.net</a></li></ul></div><div class="col-6 col-lg-auto text-muted"><h6>Contact</h6><ul class=list-unstyled><li class=mb-1><a class="link-underline link-underline-opacity-0" href=mailto:support@gothenburgbitfactory.org><em class="bi bi-envelope-fill"></em>&ensp;Email</a></li><li class=mb-1><a class="link-underline link-underline-opacity-0" href=https://twitter.com/taskwarrior><em class="bi bi-twitter"></em>&ensp;Twitter</a></li></ul></div><div class="col-6 col-lg-auto text-muted"><h6>Donate</h6><ul class=list-unstyled><li class=mb-1><a class="link-underline link-underline-opacity-0" href=https://github.com/sponsors/GothenburgBitFactory><em class="bi bi-github"></em>&ensp;GitHub sponsors</a></li></ul></div><div class="col-12 col-lg-auto text-muted"><p>Copyright &copy; 2026 <a class="link-underline link-underline-opacity-0" href=https://github.com/GothenburgBitFactory>Gothenburg Bit Factory</a></p><p>Powered by <a class="link-underline link-underline-opacity-0" href=https://gohugo.io>Hugo</a></p></div></div></div></footer><script src=/js/bootstrap.min.js></script><script src=/js/highlight.pack.js></script><script>hljs.initHighlightingOnLoad()</script></body></html>

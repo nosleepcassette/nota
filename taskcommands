@@ -1,0 +1,276 @@
+
+Command          Category  R/W ID GC Recur Context Filter Mods Misc Description
+---------------- --------- --- -- -- ----- ------- ------ ---- ---- ----------------
+_aliases         internal   RO                                      Generates a list
+                                                                    of all aliases,
+                                                                    for
+                                                                    autocompletion
+                                                                    purposes
+_columns         internal   RO                                      Displays only a
+                                                                    list of
+                                                                    supported
+                                                                    columns
+_commands        internal   RO                                      Generates a list
+                                                                    of all commands,
+                                                                    for
+                                                                    autocompletion
+                                                                    purposes
+_config          internal   RO                                      Lists all
+                                                                    supported
+                                                                    configuration
+                                                                    variables, for
+                                                                    completion
+                                                                    purposes
+_context         internal   RO                                      Lists all
+                                                                    supported
+                                                                    contexts, for
+                                                                    completion
+                                                                    purposes
+_get             internal   RO                                 Misc DOM Accessor
+_ids             internal   RO ID GC Recur           Filt           Shows the IDs of
+                                                                    matching tasks,
+                                                                    in the form of a
+                                                                    list
+_projects        internal   RO    GC Recur           Filt           Shows only a
+                                                                    list of all
+                                                                    project names
+                                                                    used
+_show            internal   RO    GC                                Shows all
+                                                                    configuration
+                                                                    settings in a
+                                                                    machine-readable
+                                                                    format
+_tags            internal   RO    GC Recur           Filt           Shows only a
+                                                                    list of all tags
+                                                                    used, for
+                                                                    autocompletion
+                                                                    purposes
+_udas            internal   RO                                      Shows the
+                                                                    defined UDAs for
+                                                                    completion
+                                                                    purposes
+_unique          internal   RO ID GC                 Filt      Misc Generates lists
+                                                                    of unique
+                                                                    attribute values
+_urgency         internal   RO    GC                 Filt           Displays the
+                                                                    urgency measure
+                                                                    of a task
+_uuids           internal   RO    GC Recur           Filt           Shows the UUIDs
+                                                                    of matching
+                                                                    tasks, as a list
+_version         internal   RO                                      Shows only the
+                                                                    Taskwarrior
+                                                                    version number
+_zshattributes   internal   RO                                      Generates a list
+                                                                    of all
+                                                                    attributes, for
+                                                                    zsh
+                                                                    autocompletion
+                                                                    purposes
+_zshcommands     internal   RO                                      Generates a list
+                                                                    of all commands,
+                                                                    for zsh
+                                                                    autocompletion
+                                                                    purposes
+_zshids          internal   RO ID GC Recur           Filt           Shows the IDs
+                                                                    and descriptions
+                                                                    of matching
+                                                                    tasks
+_zshuuids        internal   RO    GC Recur           Filt           Shows the UUIDs
+                                                                    and descriptions
+                                                                    of matching
+                                                                    tasks
+active           report     RO ID GC Recur    Ctxt   Filt           Active tasks
+add              operation  RW                Ctxt        Mods      Adds a new task
+all              report     RO ID GC Recur    Ctxt   Filt           All tasks
+annotate         operation  RW                       Filt Mods      Adds an
+                                                                    annotation to an
+                                                                    existing task
+append           operation  RW                       Filt Mods      Appends text to
+                                                                    an existing task
+                                                                    description
+blocked          report     RO ID GC Recur    Ctxt   Filt           Blocked tasks
+blocking         report     RO ID GC Recur    Ctxt   Filt           Blocking tasks
+burndown.daily   graphs     RO    GC Recur    Ctxt   Filt           Shows a
+                                                                    graphical
+                                                                    burndown chart,
+                                                                    by day
+burndown.monthly graphs     RO    GC Recur    Ctxt   Filt           Shows a
+                                                                    graphical
+                                                                    burndown chart,
+                                                                    by month
+burndown.weekly  graphs     RO    GC Recur    Ctxt   Filt           Shows a
+                                                                    graphical
+                                                                    burndown chart,
+                                                                    by week
+calc             misc       RO                                 Misc Calculator
+calendar         graphs     RO ID GC                           Misc Shows a
+                                                                    calendar, with
+                                                                    due tasks marked
+colors           misc       RO                                 Misc All colors, a
+                                                                    sample, or a
+                                                                    legend
+columns          config     RO                                 Misc All supported
+                                                                    columns and
+                                                                    formatting
+                                                                    styles
+commands         metadata   RO                                      Generates a list
+                                                                    of all commands,
+                                                                    with behavior
+                                                                    details
+completed        report     RO ID GC Recur    Ctxt   Filt           Completed tasks
+config           config     RO                                 Misc Change settings
+                                                                    in the task
+                                                                    configuration
+context          context    RO                                 Misc Set and define
+                                                                    contexts
+                                                                    (default filters
+                                                                    / modifications)
+count            metadata   RO    GC Recur    Ctxt   Filt           Counts matching
+                                                                    tasks
+delete           operation  RW                Ctxt   Filt Mods      Deletes the
+                                                                    specified task
+denotate         operation  RW                Ctxt   Filt      Misc Deletes an
+                                                                    annotation
+diagnostics      misc       RO                                      Platform, build
+                                                                    and environment
+                                                                    details
+done             operation  RW                Ctxt   Filt Mods      Marks the
+                                                                    specified task
+                                                                    as completed
+duplicate        operation  RW                Ctxt   Filt Mods      Duplicates the
+                                                                    specified tasks
+edit             operation  RW       Recur    Ctxt   Filt           Launches an
+                                                                    editor to modify
+                                                                    a task directly
+execute          misc       RO                                 Misc Executes
+                                                                    external
+                                                                    commands and
+                                                                    scripts
+export           migration  RO ID GC Recur           Filt      Misc Exports tasks in
+                                                                    JSON format
+ghistory.annual  graphs     RO       Recur    Ctxt   Filt           Shows a
+                                                                    graphical report
+                                                                    of task history,
+                                                                    by year
+ghistory.daily   graphs     RO       Recur    Ctxt   Filt           Shows a
+                                                                    graphical report
+                                                                    of task history,
+                                                                    by day
+ghistory.monthly graphs     RO       Recur    Ctxt   Filt           Shows a
+                                                                    graphical report
+                                                                    of task history,
+                                                                    by month
+ghistory.weekly  graphs     RO       Recur    Ctxt   Filt           Shows a
+                                                                    graphical report
+                                                                    of task history,
+                                                                    by week
+help             misc       RO                                 Misc Displays this
+                                                                    usage help text
+history.annual   graphs     RO       Recur    Ctxt   Filt           Shows a report
+                                                                    of task history,
+                                                                    by year
+history.daily    graphs     RO       Recur    Ctxt   Filt           Shows a report
+                                                                    of task history,
+                                                                    by day
+history.monthly  graphs     RO       Recur    Ctxt   Filt           Shows a report
+                                                                    of task history,
+                                                                    by month
+history.weekly   graphs     RO       Recur    Ctxt   Filt           Shows a report
+                                                                    of task history,
+                                                                    by week
+ids              metadata   RO ID GC Recur           Filt           Shows the IDs of
+                                                                    matching tasks,
+                                                                    as a range
+import           migration  RW                                 Misc Imports JSON
+                                                                    files
+import-v2        migration  RW                                 Misc Imports
+                                                                    Taskwarrior v2.x
+                                                                    files
+information      metadata   RO                       Filt           Shows all data
+                                                                    and metadata
+list             report     RO ID GC Recur    Ctxt   Filt           Most details of
+                                                                    tasks
+log              operation  RW                Ctxt        Mods      Adds a new task
+                                                                    that is already
+                                                                    completed
+logo             misc       RO                                      Displays the
+                                                                    Taskwarrior logo
+long             report     RO ID GC Recur    Ctxt   Filt           All details of
+                                                                    tasks
+ls               report     RO ID GC Recur    Ctxt   Filt           Few details of
+                                                                    tasks
+minimal          report     RO ID GC Recur    Ctxt   Filt           Minimal details
+                                                                    of tasks
+modify           operation  RW                       Filt Mods      Modifies the
+                                                                    existing task
+                                                                    with provided
+                                                                    arguments.
+newest           report     RO ID GC Recur    Ctxt   Filt           Newest tasks
+news             misc       RO                                      Displays news
+                                                                    about the recent
+                                                                    releases
+next             report     RO ID GC Recur    Ctxt   Filt           Most urgent
+                                                                    tasks
+oldest           report     RO ID GC Recur    Ctxt   Filt           Oldest tasks
+overdue          report     RO ID GC Recur    Ctxt   Filt           Overdue tasks
+prepend          operation  RW                Ctxt   Filt Mods      Prepends text to
+                                                                    an existing task
+                                                                    description
+projects         metadata   RO    GC Recur    Ctxt   Filt           Shows all
+                                                                    project names
+                                                                    used
+purge            operation  RW    GC          Ctxt   Filt           Removes the
+                                                                    specified tasks
+                                                                    from the data
+                                                                    files. Causes
+                                                                    permanent loss
+                                                                    of data.
+ready            report     RO ID GC Recur    Ctxt   Filt           Most urgent
+                                                                    actionable tasks
+recurring        report     RO ID GC Recur    Ctxt   Filt           Recurring Tasks
+reports          config     RO                                      Lists all
+                                                                    supported
+                                                                    reports
+show             config     RO                                 Misc Shows all
+                                                                    configuration
+                                                                    variables or
+                                                                    subset
+start            operation  RW                Ctxt   Filt Mods      Marks specified
+                                                                    task as started
+stats            metadata   RO    GC          Ctxt   Filt           Shows task
+                                                                    database
+                                                                    statistics
+stop             operation  RW                Ctxt   Filt Mods      Removes the
+                                                                    'start' time
+                                                                    from a task
+summary          graphs     RO    GC          Ctxt   Filt           Shows a report
+                                                                    of task status
+                                                                    by project
+synchronize      migration  RW                                 Misc Synchronizes
+                                                                    data with the
+                                                                    Taskserver
+tags             metadata   RO    GC          Ctxt   Filt           Shows a list of
+                                                                    all tags used
+timesheet        report     RO    GC Recur           Filt           Summary of
+                                                                    completed and
+                                                                    started tasks
+udas             config     RO                                      Shows all the
+                                                                    defined UDA
+                                                                    details
+unblocked        report     RO ID GC Recur    Ctxt   Filt           Unblocked tasks
+undo             operation  RW                                      Reverts the most
+                                                                    recent change to
+                                                                    a task
+uuids            metadata   RO    GC Recur           Filt           Shows the UUIDs
+                                                                    of matching
+                                                                    tasks, as a
+                                                                    space-separated
+                                                                    list
+version          misc       RO                                      Shows the
+                                                                    Taskwarrior
+                                                                    version number
+waiting          report     RO ID GC Recur    Ctxt   Filt           Waiting (hidden)
+                                                                    tasks
+
+

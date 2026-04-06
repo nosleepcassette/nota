@@ -1,0 +1,410 @@
+#!/usr/bin/env python3
+# maps · cassette.help · MIT
+"""
+nota — intelligent task CLI backed by taskwarrior
+
+Commands:
+  nota setup                            Install UDAs and contexts into ~/.taskrc
+  nota add "text [inline syntax]"       Add task(s) — parses -> and :: syntax
+  nota list [--project X] [--scope X]  List pending tasks grouped by project
+  nota next                             Most urgent actionable tasks
+  nota blocked                          Tasks blocked by unfinished dependencies
+  nota show ID                          Full task detail
+  nota done ID                          Mark task complete
+  nota depend ID --on ID2               ID depends on ID2 (ID2 is prerequisite)
+  nota annotate ID "note"               Add a note to a task
+  nota projects                         Projects with task counts
+  nota braindump "text" [--model ALIAS] [--dry-run]  LLM-parse → tasks
+  nota log "habit"                      Log countable habit (multiple per day, e.g. cigarettes)
+  nota mcp                              Start MCP stdio server
+
+Inline syntax (used in `nota add`):
+  ->   prerequisite:  "reply to pick n pull -> find stamps"
+       (cannot complete left until right is done)
+  ::   related-to:    "task A :: task B"
+  p1–p4               priority (p1/p2 → H, p3 → M, p4 → L)
+  @project            project assignment
+  #tag                add tag
+  scope:X             scope (meatspace/digital/server/etc.)
+  due:DATE            due date (taskwarrior natural language: today/eow/friday/etc.)
+"""
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT))
+
+from src.parse import parse_inline
+from src.tw import (
+    task_add, task_get, task_list, task_next, task_blocked,
+    task_done, task_depend, task_annotate, task_projects,
+    task_modify, fmt_row, fmt_detail, _run,
+)
+
+
+# ── commands ──────────────────────────────────────────────────────────────────
+
+def cmd_setup(args):
+    print("Setting up nota UDAs and contexts...")
+    from src.setup import run_setup
+    run_setup(verbose=True)
+
+
+def cmd_add(args):
+    parsed = parse_inline(args.title)
+
+    # Map p-priority to tw priority
+    pri = parsed["priority"]
+    pri_p = f"p{pri}"
+
+    # Create the main task
+    task = task_add(
+        description=parsed["title"],
+        project=parsed["project"] if parsed["project"] != "inbox" else None,
+        priority_p=pri_p,
+        due=parsed["due_date"],
+        tags=parsed["tags"],
+        scope=parsed["scope"] or None,
+        body=args.body or None,
+    )
+    main_id = task.get("id")
+
+    created = [main_id] if main_id else []
+    dep_ids = []
+
+    # Create subtasks (prerequisites) and link depends
+    for sub_title in parsed["subtasks"]:
+        sub_parsed = parse_inline(sub_title)
+        sub_task = task_add(
+            description=sub_parsed["title"],
+            project=(sub_parsed["project"] if sub_parsed["project"] != "inbox"
+                     else (parsed["project"] if parsed["project"] != "inbox" else None)),
+            priority_p=f"p{sub_parsed['priority']}",
+            due=sub_parsed["due_date"],
+            scope=sub_parsed["scope"] or parsed["scope"] or None,
+        )
+        sub_id = sub_task.get("id")
+        if sub_id:
+            created.append(sub_id)
+            dep_ids.append(sub_id)
+
+    # Set dependencies on main task (main depends on all subs)
+    if main_id and dep_ids:
+        _run(str(main_id), "modify", f"depends:{','.join(str(i) for i in dep_ids)}")
+
+    # Handle related_to — create/find and annotate both sides
+    for rel_title in parsed["related_titles"]:
+        # Try to find existing task by description match
+        all_tasks = task_list(status="pending", limit=500)
+        existing = next(
+            (t for t in all_tasks if rel_title.lower() in t.get("description", "").lower()),
+            None
+        )
+        if existing:
+            rel_id = existing["id"]
+        else:
+            rel_task = task_add(
+                description=rel_title,
+                project=parsed["project"] if parsed["project"] != "inbox" else None,
+            )
+            rel_id = rel_task.get("id")
+            if rel_id:
+                created.append(rel_id)
+
+        if main_id and rel_id:
+            task_annotate(main_id, f"related: [{rel_id}] {rel_title}")
+            task_annotate(rel_id, f"related: [{main_id}] {parsed['title']}")
+
+    if args.json:
+        print(json.dumps({"created": created, "main_id": main_id}))
+    else:
+        t = task_get(main_id) if main_id else None
+        if t:
+            print(f"Added [{main_id}] {t['description']}")
+        if len(created) > 1:
+            print(f"  + {len(created)-1} linked task(s): {created[1:]}")
+
+
+def cmd_list(args):
+    tasks = task_list(
+        project=args.project,
+        scope=args.scope,
+        priority_p=f"p{args.priority}" if args.priority else None,
+        status="pending",
+    )
+    if args.json:
+        print(json.dumps(tasks))
+        return
+    if not tasks:
+        print("No tasks.")
+        return
+    by_project: dict = {}
+    for t in tasks:
+        proj = t.get("project") or "inbox"
+        by_project.setdefault(proj, []).append(t)
+    for proj in sorted(by_project):
+        print(f"\n── {proj} ──")
+        for t in by_project[proj]:
+            print(fmt_row(t))
+
+
+def cmd_next(args):
+    tasks = task_next(limit=args.limit)
+    if args.json:
+        print(json.dumps(tasks))
+        return
+    if not tasks:
+        print("Nothing ready.")
+        return
+    print("\n── next (by urgency) ──")
+    for t in tasks:
+        print(fmt_row(t))
+
+
+def cmd_blocked(args):
+    tasks = task_blocked()
+    if args.json:
+        print(json.dumps(tasks))
+        return
+    if not tasks:
+        print("Nothing blocked.")
+        return
+    print("\n── blocked ──")
+    for t in tasks:
+        print(fmt_row(t))
+
+
+def cmd_show(args):
+    t = task_get(args.id)
+    if not t:
+        print(f"Task {args.id} not found.", file=sys.stderr)
+        sys.exit(1)
+    if args.json:
+        print(json.dumps(t))
+    else:
+        print(fmt_detail(t))
+
+
+def cmd_done(args):
+    ok = task_done(args.id)
+    if ok:
+        print(f"Done: [{args.id}]")
+    else:
+        print(f"Could not complete task {args.id}.", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_depend(args):
+    ok = task_depend(args.id, args.on)
+    if ok:
+        print(f"[{args.id}] now depends on [{args.on}]")
+    else:
+        print("Failed to set dependency.", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_annotate(args):
+    ok = task_annotate(args.id, args.note)
+    if ok:
+        print(f"Annotated [{args.id}]")
+    else:
+        print("Failed to annotate.", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_projects(args):
+    projects = task_projects()
+    if args.json:
+        print(json.dumps(projects))
+        return
+    if not projects:
+        print("No open tasks.")
+        return
+    for p in projects:
+        print(f"  {p['project']:<24} {p['count']} task(s)")
+
+
+def cmd_braindump(args):
+    from src.braindump import braindump
+    braindump(args.text, model=args.model or None, dry_run=args.dry_run, verbose=True)
+
+
+def cmd_track(args):
+    """Record a habit as done (or n/s) for today."""
+    from src.harsh import add_habit, log_habit, habit_names
+    name = args.habit
+    result = args.result
+    if name not in habit_names():
+        add_habit(name, frequency="0")
+        print(f"New habit: {name}")
+    written = log_habit(name, result=result, comment=args.note or "")
+    glyphs = {"y": "✓", "n": "✗", "s": "~"}
+    if written:
+        print(f"{glyphs.get(result,'?')}  {name}")
+    else:
+        print(f"Already logged '{name}' today.")
+
+
+def cmd_habits(args):
+    """Show today's habit status. Falls back to harsh CLI if available."""
+    import subprocess as _sp
+    from src.harsh import habit_names, today_results
+    import datetime as _dt
+
+    names = habit_names()
+    if not names:
+        print("No habits configured. Edit ~/.config/harsh/habits")
+        return
+
+    done = today_results()
+
+    if args.json:
+        print(json.dumps([{"name": n, "result": done.get(n)} for n in names]))
+        return
+
+    # Try harsh log --json for richer data, fall back to simple display
+    richer = None
+    try:
+        r = _sp.run(["harsh", "log", "--json"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            richer = {h["name"]: h for h in __import__("json").loads(r.stdout).get("habits", [])}
+    except Exception:
+        pass
+
+    today = _dt.date.today()
+    print(f"\n── habits · {today} ──────────────────────────")
+    print(f"  {'':3}  {'habit':<28}  {'freq':<6}  streak  last")
+    print(f"  {'─'*3}  {'─'*28}  {'─'*6}  {'─'*6}  {'─'*10}")
+    glyphs = {"y": "✓", "n": "✗", "s": "~", None: "○"}
+    for name in names:
+        result = done.get(name)
+        glyph = glyphs.get(result, "○")
+        if richer and name in richer:
+            h = richer[name]
+            streak = h.get("current_streak", 0) or 0
+            freq = str(h.get("frequency", "?"))
+            lc = h.get("last_completed", "")
+            last = lc[:10] if lc else "never"
+        else:
+            streak = ""
+            freq = ""
+            last = "today" if result else ""
+        print(f"  {glyph:3}  {name:<28}  {freq:<6}  {str(streak):<6}  {last}")
+    print()
+
+
+def cmd_log(args):
+    """Log a countable habit instance — multiple per day allowed."""
+    from src.harsh import log_habit_count
+    count = log_habit_count(args.habit, comment=args.note or "")
+    print(f"✓  {args.habit}  (×{count} today)")
+
+
+def cmd_mcp(args):
+    try:
+        from src.mcp_server import run
+        run()
+    except ImportError:
+        print("MCP server not yet implemented. See CHANGELOG.md Step 4.", file=sys.stderr)
+        sys.exit(1)
+
+
+# ── CLI wiring ────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="nota",
+        description="nota — intelligent task management backed by taskwarrior",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("setup", help="Install UDAs and contexts into ~/.taskrc (run once)")
+
+    p_add = sub.add_parser("add", help='Add task(s). Supports -> and :: syntax.')
+    p_add.add_argument("title", help='"task title [p1] [@proj] [#tag] [scope:X] [due:DATE] [-> prereq] [:: related]"')
+    p_add.add_argument("--body", default="", help="Notes (added as annotation)")
+    p_add.add_argument("--json", action="store_true")
+
+    p_list = sub.add_parser("list", help="List pending tasks")
+    p_list.add_argument("--project", default=None)
+    p_list.add_argument("--scope", default=None)
+    p_list.add_argument("--priority", type=int, default=None, choices=[1,2,3,4])
+    p_list.add_argument("--json", action="store_true")
+
+    p_next = sub.add_parser("next", help="Most urgent actionable tasks")
+    p_next.add_argument("--limit", type=int, default=20)
+    p_next.add_argument("--json", action="store_true")
+
+    p_blocked = sub.add_parser("blocked", help="Tasks blocked by unfinished prerequisites")
+    p_blocked.add_argument("--json", action="store_true")
+
+    p_show = sub.add_parser("show", help="Full task detail")
+    p_show.add_argument("id", type=int)
+    p_show.add_argument("--json", action="store_true")
+
+    p_done = sub.add_parser("done", help="Mark task complete")
+    p_done.add_argument("id", type=int)
+
+    p_dep = sub.add_parser("depend", help="Set dependency: ID depends on ID2")
+    p_dep.add_argument("id", type=int)
+    p_dep.add_argument("--on", type=int, required=True, metavar="ID2", help="Prerequisite task ID")
+
+    p_ann = sub.add_parser("annotate", help="Add a note to a task")
+    p_ann.add_argument("id", type=int)
+    p_ann.add_argument("note")
+
+    p_proj = sub.add_parser("projects", help="Projects with task counts")
+    p_proj.add_argument("--json", action="store_true")
+
+    p_bd = sub.add_parser("braindump", help="LLM-parse freeform text into tasks")
+    p_bd.add_argument("text", help="Freeform brain dump")
+    p_bd.add_argument("--model", default=None, help="Model alias (see src/braindump.py MODELS)")
+    p_bd.add_argument("--dry-run", action="store_true", help="Print parsed JSON without inserting")
+
+    p_track = sub.add_parser("track", help="Record a habit as done today (y/n/s)")
+    p_track.add_argument("habit", help="Habit name (auto-created if new)")
+    p_track.add_argument("--result", "-r", default="y", choices=["y", "n", "s"])
+    p_track.add_argument("--note", "-m", default="", help="Optional comment")
+
+    # 'did' is natural-language alias for 'track --result y'
+    p_log = sub.add_parser("log", help='Log a countable habit (multiple per day): nota log "smoked cigarette"')
+    p_log.add_argument("habit", help="Habit name")
+    p_log.add_argument("--note", default="", help="Optional note")
+
+    p_did = sub.add_parser("did", help='Alias: nota did "watered plants" → track as done')
+    p_did.add_argument("habit")
+    p_did.add_argument("--note", "-m", default="")
+
+    p_hb = sub.add_parser("habits", help="Show today's habit status")
+    p_hb.add_argument("--json", action="store_true")
+
+    sub.add_parser("mcp", help="Start MCP stdio server")
+
+    args = parser.parse_args()
+    {
+        "setup":    cmd_setup,
+        "add":      cmd_add,
+        "list":     cmd_list,
+        "next":     cmd_next,
+        "blocked":  cmd_blocked,
+        "show":     cmd_show,
+        "done":     cmd_done,
+        "depend":   cmd_depend,
+        "annotate": cmd_annotate,
+        "projects":   cmd_projects,
+        "braindump":  cmd_braindump,
+        "track":      cmd_track,
+        "log":        cmd_log,
+        "did":        lambda a: cmd_track(type("A", (), {"habit": a.habit, "result": "y", "note": a.note})()),
+        "habits":     cmd_habits,
+        "mcp":        cmd_mcp,
+    }[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()
