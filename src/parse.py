@@ -25,6 +25,23 @@ from src.scopes import get_all_scopes, is_valid_scope
 PRIORITY_MAP = {"p1": 1, "p2": 2, "p3": 3, "p4": 4}
 
 
+def _looks_freeform(text: str) -> bool:
+    """
+    True if text looks like natural language rather than nota inline syntax.
+    Triggers NLP routing in nota add.
+    """
+    t = text.strip()
+    has_syntax = (
+        "@" in t
+        or "#" in t
+        or "::" in t
+        or "->" in t
+        or "scope:" in t.lower()
+        or any(f" {p}" in t.lower() or t.lower().startswith(f"{p} ") for p in ("p1", "p2", "p3", "p4"))
+    )
+    return not has_syntax and len(t.split()) >= 4
+
+
 def _get_scopes_set() -> set:
     """Get scopes as a set for validation."""
     return set(get_all_scopes().keys())

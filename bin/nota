@@ -56,7 +56,51 @@ def cmd_setup(args):
 
 
 def cmd_add(args):
-    parsed = parse_inline(args.title)
+    from src.parse import _looks_freeform
+
+    text = args.title
+    advanced_flags = any([args.body, args.recur, args.until, args.wait, args.scheduled, args.json])
+    use_nlp = not args.no_nlp and not advanced_flags and _looks_freeform(text)
+
+    if use_nlp:
+        try:
+            from src.braindump import MODELS, _detect_fast_provider, _get_api_key
+
+            model_alias = _detect_fast_provider()
+            cfg = MODELS.get(model_alias, {})
+            key_env = cfg.get("key_env")
+            if not key_env or not _get_api_key(key_env):
+                use_nlp = False
+        except Exception:
+            use_nlp = False
+
+    if use_nlp:
+        try:
+            from src.braindump import _priority_map, nlp_single_task
+            from src.scopes import is_valid_scope
+
+            t = nlp_single_task(text)
+            priority_str = str(t.get("priority", "M")).upper()
+            scope = str(t.get("scope") or "").strip()
+            if not scope or not is_valid_scope(scope):
+                scope = None
+            tags = t.get("tags") or []
+            if not isinstance(tags, list):
+                tags = []
+            task = task_add(
+                description=t.get("description") or text.strip(),
+                project=t.get("project") or "inbox",
+                priority_p=_priority_map(priority_str),
+                due=t.get("due") or None,
+                tags=tags,
+                scope=scope,
+            )
+            print(f"+ [{task.get('id','?')}] {task.get('description','')}  (nlp)")
+            return
+        except Exception as e:
+            print(f"  [nlp failed: {e}, using inline parser]", file=sys.stderr)
+
+    parsed = parse_inline(text)
 
     # Map p-priority to tw priority
     pri = parsed["priority"]
@@ -155,6 +199,19 @@ def cmd_add(args):
             print(f"  + {len(created)-1} linked task(s): {created[1:]}")
 
 
+def cmd_capture(args):
+    task = task_add(
+        description=args.text.strip(),
+        project=args.project or "inbox",
+        priority_p=args.priority or "p3",
+        due=None,
+        tags=[],
+        scope=args.scope or None,
+    )
+    tid = task.get("id", "?")
+    print(f"+ [{tid}] {task.get('description','')}")
+
+
 def cmd_list(args):
     tasks = task_list(
         project=args.project,
@@ -183,6 +240,15 @@ def cmd_next(args):
     if args.json:
         print(json.dumps(tasks))
         return
+    inbox = task_list(project="inbox", status="pending")
+    if inbox:
+        print(f"⟡ inbox: {len(inbox)} unprocessed  →  nota triage\n")
+    try:
+        overdue = _run_json("status:pending", "due.before:today", "export")
+        if overdue:
+            print(f"⟡ overdue: {len(overdue)} tasks\n")
+    except Exception:
+        pass
     if not tasks:
         print("Nothing ready.")
         return
@@ -529,7 +595,95 @@ def cmd_waiting(args):
 
 def cmd_braindump(args):
     from src.braindump import braindump
-    braindump(args.text, model=args.model or None, dry_run=args.dry_run, verbose=True)
+    braindump(args.text, model=args.model or None, dry_run=args.dry_run,
+              confirm=args.confirm, verbose=True)
+
+
+def cmd_triage(args):
+    from src.triage import run_triage
+    run_triage(limit=args.limit)
+
+
+def cmd_webhook(args):
+    from src.webhook import run_server
+    run_server(port=args.port, host=args.host)
+
+
+def cmd_sync(args):
+    import subprocess
+    from datetime import datetime, timezone
+
+    task_dir = Path.home() / ".task"
+    sync_cfg = Path.home() / ".taskrc-sync"
+
+    remote_url = args.remote
+    if not remote_url and sync_cfg.exists():
+        remote_url = sync_cfg.read_text().strip()
+    if args.remote:
+        sync_cfg.write_text(args.remote.strip())
+        remote_url = args.remote.strip()
+        print(f"saved remote: {remote_url}")
+
+    def _git(*git_args, cwd=task_dir, check=True):
+        return subprocess.run(
+            ["git"] + list(git_args),
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=check,
+        )
+
+    if args.restore:
+        if not remote_url:
+            print("restore requires --remote URL", file=sys.stderr)
+            return
+        restore_dir = task_dir / "_restore"
+        print(f"restoring from {remote_url}...")
+        subprocess.run(["git", "clone", remote_url, str(restore_dir)], check=True)
+        export_file = restore_dir / "export.json"
+        if export_file.exists():
+            subprocess.run(["task", "import", str(export_file)], check=True)
+            print("restored.")
+        return
+
+    task_dir.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run(["task", "export"], capture_output=True, text=True)
+    export_path = task_dir / "export.json"
+    export_path.write_text(r.stdout)
+
+    if not (task_dir / ".git").exists():
+        _git("init")
+        (task_dir / ".gitignore").write_text("*.lock\n")
+        if remote_url:
+            _git("remote", "add", "origin", remote_url)
+        print("initialized git repo in ~/.task/")
+
+    if remote_url:
+        remotes = _git("remote", "-v", check=False).stdout
+        if "origin" not in remotes:
+            _git("remote", "add", "origin", remote_url)
+
+    _git("add", "-A")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    result = _git("commit", "-m", f"sync {timestamp}", check=False)
+    if result.returncode != 0:
+        combined = result.stdout + result.stderr
+        if "nothing to commit" in combined or "no changes added" in combined:
+            print("nothing to sync.")
+            return
+        print(combined.strip() or "git commit failed", file=sys.stderr)
+        return
+
+    if remote_url:
+        push = _git("push", "-u", "origin", "main", check=False)
+        if push.returncode != 0:
+            push = _git("push", "-u", "origin", "master", check=False)
+        if push.returncode == 0:
+            print(f"synced to {remote_url}")
+        else:
+            print((push.stderr or push.stdout).strip() or "git push failed", file=sys.stderr)
+    else:
+        print("synced locally (no remote configured -- use --remote URL to set one)")
 
 
 def cmd_track(args):
@@ -667,7 +821,54 @@ def cmd_bene(args):
 def cmd_find(args):
     """Advanced search/filter."""
     from src.query import build_filter
-    
+
+    def _render(tasks):
+        if args.json:
+            print(json.dumps(tasks))
+            return
+        if not tasks:
+            print("No tasks found.")
+            return
+        by_project: dict = {}
+        for t in tasks:
+            proj = t.get("project") or "inbox"
+            by_project.setdefault(proj, []).append(t)
+        for proj in sorted(by_project):
+            print(f"\n── {proj} ──")
+            for t in by_project[proj]:
+                print(fmt_row(t))
+
+    text = args.expression or ""
+    is_sentence = ":" not in text and len(text.split()) >= 3
+    filter_kwargs = {}
+
+    if is_sentence and not args.no_nlp:
+        try:
+            from src.query import nlp_to_filter
+
+            filter_kwargs = nlp_to_filter(text)
+        except Exception:
+            filter_kwargs = {}
+
+    if filter_kwargs:
+        status = filter_kwargs.pop("status", "pending") or "pending"
+        extra = filter_kwargs.pop("extra", None)
+        clean_kwargs = {k: v for k, v in filter_kwargs.items() if v is not None}
+        if "priority" in clean_kwargs:
+            try:
+                clean_kwargs["priority"] = int(clean_kwargs["priority"])
+            except (TypeError, ValueError):
+                clean_kwargs.pop("priority", None)
+        filters = build_filter(
+            status=None if status == "all" else status,
+            extra=extra,
+            **clean_kwargs,
+        )
+        tasks = _run_json(*filters, "export")
+        tasks.sort(key=lambda t: t.get("urgency", 0), reverse=True)
+        _render(tasks[: args.limit])
+        return
+
     filters = build_filter(
         project=args.project,
         scope=args.scope,
@@ -679,9 +880,9 @@ def cmd_find(args):
         unblocked=args.unblocked,
         extra=args.expression,
     )
-    
+
     extra = " ".join(filters) if filters else ""
-    
+
     tasks = task_list(
         project=args.project,
         scope=args.scope,
@@ -690,23 +891,8 @@ def cmd_find(args):
         extra_filter=extra,
         limit=args.limit,
     )
-    
-    if args.json:
-        print(json.dumps(tasks))
-        return
-    
-    if not tasks:
-        print("No tasks found.")
-        return
-    
-    by_project: dict = {}
-    for t in tasks:
-        proj = t.get("project") or "inbox"
-        by_project.setdefault(proj, []).append(t)
-    for proj in sorted(by_project):
-        print(f"\n── {proj} ──")
-        for t in by_project[proj]:
-            print(fmt_row(t))
+
+    _render(tasks)
 
 
 # ── CLI wiring ────────────────────────────────────────────────────────────────
@@ -729,6 +915,14 @@ def main():
     p_add.add_argument("--until", help="Recurrence end date")
     p_add.add_argument("--wait", help="Wait until date (hidden until)")
     p_add.add_argument("--scheduled", help="Scheduled date (actionable after)")
+    p_add.add_argument("--no-nlp", action="store_true",
+        help="Skip NLP inference, use inline syntax only")
+
+    p_cap = sub.add_parser("capture", aliases=["c"], help="Instantly drop text into inbox (no LLM, no confirm)")
+    p_cap.add_argument("text", help="What to capture")
+    p_cap.add_argument("--project", default="inbox", help="Project (default: inbox)")
+    p_cap.add_argument("--scope", default=None, help="Scope")
+    p_cap.add_argument("--priority", default="p3", help="Priority p1-p4 (default: p3)")
 
     p_list = sub.add_parser("list", help="List pending tasks")
     p_list.add_argument("--project", default=None)
@@ -815,6 +1009,11 @@ def main():
     p_bd.add_argument("text", help="Freeform brain dump")
     p_bd.add_argument("--model", default=None, help="Model alias (see src/braindump.py MODELS)")
     p_bd.add_argument("--dry-run", action="store_true", help="Print parsed JSON without inserting")
+    p_bd.add_argument("--confirm", action="store_true",
+        help="Review and edit parsed tasks before inserting")
+
+    p_triage = sub.add_parser("triage", help="Process @inbox tasks one at a time")
+    p_triage.add_argument("--limit", type=int, default=50, help="Max tasks to show")
 
     p_track = sub.add_parser("track", help="Record a habit as done today (y/n/s)")
     p_track.add_argument("habit", help="Habit name (auto-created if new)")
@@ -853,6 +1052,16 @@ def main():
     p_find.add_argument("--limit", type=int, default=50)
     p_find.add_argument("expression", nargs="?", help="Raw taskwarrior expression")
     p_find.add_argument("--json", action="store_true")
+    p_find.add_argument("--no-nlp", action="store_true",
+        help="Skip NLP query parsing, use raw taskwarrior expression")
+
+    p_wh = sub.add_parser("webhook", help="Start HTTP capture server (for iOS Shortcuts, automation)")
+    p_wh.add_argument("--port", type=int, default=5555, help="Port to listen on (default: 5555)")
+    p_wh.add_argument("--host", default="127.0.0.1", help="Host (default: 127.0.0.1, localhost only)")
+
+    p_sync = sub.add_parser("sync", help="Backup tasks to private git remote")
+    p_sync.add_argument("--restore", action="store_true", help="Restore from remote (task import)")
+    p_sync.add_argument("--remote", default=None, help="Git remote URL (set once; saved to ~/.taskrc-sync)")
 
     sub.add_parser("mcp", help="Start MCP stdio server")
 
@@ -862,6 +1071,8 @@ def main():
     {
         "setup":    cmd_setup,
         "add":      cmd_add,
+        "capture":  cmd_capture,
+        "c":        cmd_capture,
         "list":     cmd_list,
         "next":     cmd_next,
         "blocked":  cmd_blocked,
@@ -881,11 +1092,14 @@ def main():
         "recurring": cmd_recurring,
         "waiting":   cmd_waiting,
         "braindump":  cmd_braindump,
+        "triage":     cmd_triage,
         "track":      cmd_track,
         "log":        cmd_log,
         "did":        lambda a: cmd_track(type("A", (), {"habit": a.habit, "result": "y", "note": a.note})()),
         "habits":     cmd_habits,
         "habit":      cmd_habit,
+        "webhook":    cmd_webhook,
+        "sync":       cmd_sync,
         "bene":       cmd_bene,
         "mcp":        cmd_mcp,
     }[args.cmd](args)

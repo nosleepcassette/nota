@@ -27,7 +27,7 @@ except ImportError:
 
 AMBER = "rgb(255,176,0)"
 AMBER_BRIGHT = "rgb(255,200,50)"
-AMBER_DIM = "rgb(150,100,0)"
+AMBER_DIM = "rgb(210,160,0)"
 CURSOR_AMBER = "rgb(255,140,0)"
 
 
@@ -284,7 +284,7 @@ def render_task_detail(t) -> str:
 def render_help() -> str:
     return """
   [bold]Commands[/bold]
-    (a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit
+    (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit
 
   [dim]press ? for full help[/dim]
 """
@@ -300,7 +300,7 @@ def render_full_help() -> str:
 
   [bold amber]Actions[/bold amber]
     enter or v      view task detail
-    d               mark done
+    c               mark complete
     dd              delete task
     a               add new task
     e               edit task (opens in editor)
@@ -317,6 +317,15 @@ def render_full_help() -> str:
     s t             sort by description
     s i             sort by id (default)
     s .             toggle reverse
+
+  [bold amber]Add syntax[/bold amber]  (CLI `nota add` only — TUI `a` saves raw text)
+    @project        assign project        "fix router @homelab"
+    #tag            add tag               "#quick #errand"
+    p1–p4           priority (p1=urgent)  "p2 call dentist"
+    due:DATE        due date (tw NL)      "due:tomorrow  due:eow  due:friday"
+    scope:X         scope                 "scope:meatspace"
+    ->              prerequisite          "reply to email -> find attachment"
+    ::              related-to            "task A :: task B"
 """
 
 
@@ -326,6 +335,47 @@ def render_sort_menu() -> str:
     (p)roject  (s)cope  (r)riority  (d)ue  (t)itle  (i)d
     (.)toggle reverse  (q)uit
 """
+
+
+def _tui_add(text: str) -> dict:
+    """Parse and add a task from the TUI prompt. Tries NLP for freeform input,
+    falls back to inline syntax parser."""
+    from src.tw import task_add
+    from src.parse import parse_inline, _looks_freeform
+
+    if _looks_freeform(text):
+        try:
+            from src.braindump import MODELS, _detect_fast_provider, _get_api_key, _priority_map, nlp_single_task
+            from src.scopes import is_valid_scope
+            model_alias = _detect_fast_provider()
+            cfg = MODELS.get(model_alias, {})
+            key_env = cfg.get("key_env")
+            if key_env and _get_api_key(key_env):
+                t = nlp_single_task(text)
+                scope = str(t.get("scope") or "").strip()
+                if not scope or not is_valid_scope(scope):
+                    scope = None
+                tags = t.get("tags") or []
+                return task_add(
+                    description=t.get("description") or text,
+                    project=t.get("project") or "inbox",
+                    priority_p=_priority_map(str(t.get("priority", "M")).upper()),
+                    due=t.get("due") or None,
+                    tags=tags if isinstance(tags, list) else [],
+                    scope=scope,
+                )
+        except Exception:
+            pass  # fall through to inline parser
+
+    p = parse_inline(text)
+    return task_add(
+        description=p["title"] or text,
+        project=p.get("project") or "inbox",
+        priority_p=f"p{p.get('priority', 3)}",
+        due=p.get("due_date"),
+        tags=p.get("tags") or [],
+        scope=p.get("scope") or None,
+    )
 
 
 def run():
@@ -366,7 +416,7 @@ def run():
         if HAS_RICH:
             console = Console(force_terminal=True)
             banner = Panel(
-                "(a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  (g)o top/bot",
+                "(a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  (g)o top/bot",
                 border_style=AMBER,
                 box=box.ROUNDED,
                 padding=(0, 2),
@@ -376,19 +426,19 @@ def run():
             frame.extend(cap.get().split("\n"))
         else:
             frame.append(
-                "  (a)dd  (d)one  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  (g)o top/bot"
+                "  (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  (g)o top/bot"
             )
             frame.append("─" * term_width)
 
         sort_indicator = (
-            f" \033[90msorted by {sort_by}"
+            f" \033[33msorted by {sort_by}"
             + (" (reverse)" if sort_reverse else "")
             + "\033[0m"
         )
         frame.append(
-            f"\033[1;33mnota\033[0m{sort_indicator}  \033[90m│\033[0m press \033[1;33m?\033[0m for help"
+            f"\033[1;33mnota\033[0m{sort_indicator}  \033[33m│\033[0m press \033[1;33m?\033[0m for help"
         )
-        frame.append("\033[90m" + "─" * (term_width - 1) + "\033[0m")
+        frame.append("\033[33m" + "─" * (term_width - 1) + "\033[0m")
         frame.append("")
 
         if show_sort:
@@ -445,13 +495,13 @@ def run():
             frame.extend(table_lines)
 
         frame.append("")
-        status_line = f"\033[90m[\033[0m"
+        status_line = f"\033[33m[\033[0m"
         if search_query:
             status_line += f" search: {search_query}  │"
         status_line += f" {len(display_tasks)} tasks"
         if show_detail:
             status_line += "  │ h/l prev/next, q close"
-        status_line += "\033[90m]\033[0m"
+        status_line += "\033[33m]\033[0m"
         frame.append(status_line)
 
         sys.stdout.write("\033[2J\033[H")
@@ -550,6 +600,21 @@ def run():
                     cursor = max(0, len(display_tasks) - 1)
             pending_key = ""
 
+        elif key == "c":
+            if display_tasks and cursor < len(display_tasks):
+                t = display_tasks[cursor]
+                task_done(t.get("id"))
+                tasks = task_list(status="pending", limit=50)
+                display_tasks = tasks
+                if search_query:
+                    q = search_query.lower()
+                    display_tasks = [
+                        t for t in tasks if q in t.get("description", "").lower()
+                    ]
+                if cursor >= len(display_tasks):
+                    cursor = max(0, len(display_tasks) - 1)
+            pending_key = ""
+
         elif key == "d":
             pending_key = "d"
 
@@ -615,7 +680,7 @@ def run():
 
         elif key == "/":
             show_cursor()
-            sys.stdout.write("  \033[90msearch: \033[0m")
+            sys.stdout.write("  \033[33msearch: \033[0m")
             sys.stdout.flush()
             search_query = input().strip()
             hide_cursor()
@@ -625,12 +690,12 @@ def run():
 
         elif key == "a":
             show_cursor()
-            sys.stdout.write("  \033[90madd task: \033[0m")
+            sys.stdout.write("  \033[33madd task: \033[0m")
             sys.stdout.flush()
             new_task = input().strip()
             hide_cursor()
             if new_task:
-                task_add(description=new_task)
+                _tui_add(new_task)
                 tasks = task_list(status="pending", limit=50)
                 display_tasks = tasks
                 if search_query:

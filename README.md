@@ -10,13 +10,15 @@ A task management system for the sextile/hermes agent ecosystem. Natural languag
 ```bash
 cd ~/dev/nota
 pip install -r requirements.txt
-chmod +x bin/nota
-export PATH="$PATH:$HOME/dev/nota/bin"
+make dev          # creates ~/.bin/nota symlink (run once)
 
 nota add "reply to pick n pull -> find stamps :: clean room"
 nota list
 nota show 1
+nota bene         # TUI
 ```
+
+No rebuild needed after edits — `bin/nota` runs directly from source via symlink.
 
 ---
 
@@ -47,24 +49,40 @@ The skill should understand:
 
 ## Inline syntax
 
+Works in `nota add` (CLI) **and** the TUI `a` prompt. Freeform sentences are auto-routed through NLP; structured syntax goes through the inline parser.
+
 ```
 task title                              # basic task
 task title p1                           # priority 1 (urgent)
 task title @project-name                # assign to project
 task title #tag1 #tag2                  # tags
 task title scope:meatspace              # scope
-task title due:2026-04-10               # due date
-task title -> subtask                   # add subtask (you CANNOT do task until subtask is done)
-task A :: task B                        # task A is related to task B
+task title due:tomorrow                 # due date (taskwarrior natural language)
+task title due:eow                      # end of week
+task title due:friday                   # named day
+task title -> subtask                   # prereq: cannot complete task until subtask is done
+task A :: task B                        # related-to link
 task title p2 @admin -> find stamps :: clean room  # combined
 ```
 
-### Dependency direction (important)
-`parent -> child` means **parent depends on child**. You cannot complete the parent until the child is done. Child is the prerequisite.
+**Priority levels:** `p1` = urgent (H), `p2` = high (H), `p3` = medium (M), `p4` = low (L)
 
-Example: `"reply to pick n pull -> find stamps"` means:
-- Cannot reply until stamps are found
-- "find stamps" must be completed first
+**Scopes:** `meatspace` · `digital` · `server` · `appointment` · `waiting` · `anywhere`
+
+### Dependency direction
+`parent -> child` means **parent depends on child**. Cannot complete parent until child is done.
+
+`"reply to pick n pull -> find stamps"` → cannot reply until stamps are found.
+
+### NLP freeform (via Gemini 2.0 Flash)
+If input has no syntax tokens and is 4+ words, it's routed to the LLM:
+
+```
+nota add "call the dentist sometime next week"
+# → project:inbox, due:next week, inferred priority
+```
+
+Works in both CLI and TUI `a` prompt. Requires `GEMINI_API_KEY` in env.
 
 ---
 

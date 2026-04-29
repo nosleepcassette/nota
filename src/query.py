@@ -5,7 +5,7 @@ nota query/filter builder.
 Builds taskwarrior filter expressions from arguments.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 CUSTOM_FILTERS = {
@@ -69,3 +69,39 @@ def build_filter(
         filters.append(extra)
 
     return filters
+
+
+def nlp_to_filter(text: str) -> Dict[str, Any]:
+    """
+    Convert a natural language query to nota filter kwargs.
+    Returns dict suitable for passing to build_filter().
+    Calls the fast braindump provider.
+    """
+    NL_FILTER_PROMPT = """Convert a natural language task search query to a JSON filter object.
+
+Output ONLY a JSON object with these optional keys:
+{
+  "project": "project name or null",
+  "scope": "scope name or null",
+  "priority": 1|2|3|4 or null,
+  "extra": "raw taskwarrior expression or null (e.g. 'due.before:today' for overdue)",
+  "status": "pending|completed|all (default: pending)"
+}
+
+Examples:
+"overdue tasks" -> {"extra": "due.before:today", "status": "pending"}
+"health tasks" -> {"project": "health"}
+"everything in comms scope digital" -> {"project": "comms", "scope": "digital"}
+"urgent meatspace" -> {"scope": "meatspace", "priority": 1}
+
+Output ONLY the JSON. No prose."""
+
+    try:
+        from src.braindump import _call_with_prompt
+        import json
+
+        result = _call_with_prompt(NL_FILTER_PROMPT, f"Query: {text}")
+        parsed = json.loads(result)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}  # fallback: empty filter = show all

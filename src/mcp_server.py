@@ -11,6 +11,7 @@ Add to ~/.claude.json mcpServers:
 
 Available tools:
   nota_add          — add a task (full inline syntax supported)
+  nota_capture      — raw inbox capture with no NLP or syntax parsing
   nota_braindump    — dump freeform text → tasks (Phase 1: passthrough to nota_add for now)
   nota_list         — list pending tasks
   nota_next         — most urgent actionable tasks
@@ -80,6 +81,20 @@ async def list_tools():
                     },
                 },
                 "required": ["title"],
+            },
+        ),
+        types.Tool(
+            name="nota_capture",
+            description="Instantly capture raw text into @inbox p3 with no NLP or syntax parsing.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Raw task text to capture"},
+                    "project": {"type": "string", "default": "inbox"},
+                    "scope": {"type": "string"},
+                    "priority": {"type": "string", "default": "p3"},
+                },
+                "required": ["text"],
             },
         ),
         types.Tool(
@@ -316,6 +331,17 @@ async def call_tool(name: str, arguments: dict):
                 type="text", text=json.dumps(content, indent=2, default=str)
             )
         ]
+
+    if name == "nota_capture":
+        task = task_add(
+            description=arguments["text"].strip(),
+            project=arguments.get("project") or "inbox",
+            priority_p=arguments.get("priority") or "p3",
+            due=None,
+            tags=[],
+            scope=arguments.get("scope") or None,
+        )
+        return text({"ok": True, "task": task})
 
     if name == "nota_add":
         title = arguments["title"]

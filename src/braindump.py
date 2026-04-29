@@ -83,6 +83,55 @@ MODELS = {
 VALID_SCOPES = {"meatspace","digital","server","opencassette","appointment","recurring","waiting","creative","admin","errand"}
 
 
+def _confirm_and_filter(parsed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Interactive confirm flow. Returns filtered/edited task list."""
+    if not sys.stdout.isatty():
+        print("(non-interactive: skipping confirm, inserting all)", file=sys.stderr)
+        return parsed
+
+    print(f"\nParsed {len(parsed)} task(s):\n")
+    for i, t in enumerate(parsed, 1):
+        parts = [f"  [{i}] {t.get('description', '')}"]
+        if t.get("project"):    parts.append(f"@{t['project']}")
+        if t.get("scope"):      parts.append(f"scope:{t['scope']}")
+        if t.get("priority"):   parts.append(t["priority"])
+        if t.get("due"):        parts.append(f"due:{t['due']}")
+        if t.get("depends_on"): parts.append(f"(depends on: {', '.join(t['depends_on'])})")
+        print("  ".join(parts))
+
+    print("\nInsert all? [Y/n/e]  (e = edit individual)")
+    choice = input("> ").strip().lower()
+
+    if choice == "n":
+        print("cancelled.")
+        return []
+
+    if choice == "e":
+        kept = []
+        for t in parsed:
+            desc = t.get("description", "")
+            print(f"\n  {desc}")
+            print("  [enter=keep  new text=rename  'skip'=drop]")
+            val = input("  > ").strip()
+            if val.lower() == "skip":
+                continue
+            if val:
+                t = dict(t, description=val)
+            kept.append(t)
+        if not kept:
+            print("no tasks kept.")
+            return []
+        print(f"\n{len(kept)} task(s) to insert:")
+        for t in kept:
+            print(f"  · {t['description']}")
+        print("Insert? [Y/n]")
+        if input("> ").strip().lower() == "n":
+            return []
+        return kept
+
+    return parsed  # Y or empty = insert all
+
+
 # ── prompt ────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are a task management assistant. Parse freeform text into structured tasks.
@@ -124,6 +173,34 @@ def _detect_provider() -> str:
     if _get_api_key("GEMINI_API_KEY"):
         return "gemini"       # gemini-2.0-flash — good fallback
     return "ollama"           # local last resort
+
+
+def _detect_fast_provider() -> str:
+    """Prefer fast models for single-task NLP. Gemini first, GLM backup."""
+    if _get_api_key("GEMINI_API_KEY"):
+        return "gemini"      # gemini-2.0-flash — ~800ms, sufficient
+    if _get_api_key("NVIDIA_API_KEY"):
+        return "glm"         # z-ai/glm4.7 — lighter than kimi
+    return "ollama"
+
+
+SINGLE_TASK_PROMPT = """Extract ONE task from the text. Output ONLY a JSON object (not an array).
+
+{
+  "description": "short imperative action title",
+  "project": "single word (inbox if unclear)",
+  "scope": "meatspace|digital|server|opencassette|appointment|recurring|waiting|creative|admin|errand or empty string",
+  "priority": "H, M, or L",
+  "due": "YYYY-MM-DD or natural language like 'friday' 'tomorrow' or null",
+  "tags": ["array", "of", "tags"]
+}
+
+Rules:
+- Keep description short: "call dentist", "clean bathroom", "reply to Sean"
+- Infer scope from context: physical = meatspace, computer = digital
+- Infer project from context
+- Tags: use energy labels where obvious — quick, easy, deep, call, errand, waiting
+- Output ONLY the JSON object. No prose, no markdown fences, no array wrapper."""
 
 
 def _get_api_key(key_env: Optional[str]) -> str:
@@ -197,6 +274,55 @@ def _call_llm(text: str, model_alias: str) -> List[Dict[str, Any]]:
     return json.loads(content)
 
 
+def _call_with_prompt(system_prompt: str, user_text: str, model: Optional[str] = None) -> str:
+    """Call LLM with custom system/user prompts. Returns raw content string."""
+    model_alias = model or _detect_fast_provider()
+    cfg = MODELS.get(model_alias)
+    if not cfg:
+        raise ValueError(f"Unknown model: {model_alias}")
+    try:
+        import httpx
+    except ImportError:
+        raise RuntimeError("httpx required: pip install httpx")
+
+    api_key = _get_api_key(cfg["key_env"])
+    if not api_key and cfg["key_env"]:
+        raise RuntimeError(f"API key not found. Set {cfg['key_env']} env var.")
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    body = {
+        "model": cfg["model"],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_text},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 256,
+    }
+    timeout = 30 if cfg["base_url"] == OLLAMA_BASE else 60
+    resp = httpx.post(f"{cfg['base_url']}/chat/completions", json=body, headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    content = resp.json()["choices"][0]["message"]["content"].strip()
+    if content.startswith("```"):
+        content = "\n".join(l for l in content.splitlines() if not l.startswith("```")).strip()
+    return content
+
+
+def nlp_single_task(text: str, model: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Parse one freeform sentence into a single task dict via LLM.
+    Returns a task dict (not a list). Raises on failure.
+    """
+    content = _call_with_prompt(
+        SINGLE_TASK_PROMPT,
+        f"Parse this task:\n\n{text}",
+        model=model,
+    )
+    parsed = json.loads(content)
+    if not isinstance(parsed, dict):
+        raise ValueError("single-task NLP returned non-object JSON")
+    return parsed
+
+
 # ── task creation from parsed output ─────────────────────────────────────────
 
 def _priority_map(p: str) -> str:
@@ -206,6 +332,7 @@ def _priority_map(p: str) -> str:
 def insert_parsed_tasks(
     parsed: List[Dict[str, Any]],
     dry_run: bool = False,
+    confirm: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Insert parsed tasks into taskwarrior.
@@ -217,6 +344,11 @@ def insert_parsed_tasks(
     if dry_run:
         print(json.dumps(parsed, indent=2))
         return parsed
+
+    if confirm:
+        parsed = _confirm_and_filter(parsed)
+        if not parsed:
+            return []
 
     # First pass: create all tasks, build description→id map
     created: List[Dict[str, Any]] = []
@@ -264,6 +396,7 @@ def braindump(
     text: str,
     model: Optional[str] = None,
     dry_run: bool = False,
+    confirm: bool = False,
     verbose: bool = True,
 ) -> List[Dict[str, Any]]:
     """
@@ -273,6 +406,7 @@ def braindump(
         text:     Freeform brain dump
         model:    Model alias (see MODELS dict). Auto-detected if None.
         dry_run:  Print JSON without inserting
+        confirm:  Review parsed tasks before inserting
         verbose:  Print progress
 
     Returns:
@@ -298,7 +432,7 @@ def braindump(
     if verbose:
         print(f"  {len(parsed)} task(s) parsed")
 
-    created = insert_parsed_tasks(parsed, dry_run=dry_run)
+    created = insert_parsed_tasks(parsed, dry_run=dry_run, confirm=confirm)
 
     if verbose and not dry_run:
         for t in created:
