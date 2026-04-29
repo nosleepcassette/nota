@@ -95,6 +95,42 @@ def show_cursor():
     sys.stdout.flush()
 
 
+def read_line(prompt: str) -> tuple:
+    """Read a line of input in raw mode. Returns (text, cancelled).
+    ESC or CTRL+C → (None, True). Supports backspace and basic editing."""
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    buf = []
+
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = sys.stdin.read(1)
+
+            if ch in ("\x1b", "\x03"):          # ESC or Ctrl+C → cancel
+                return (None, True)
+            elif ch in ("\r", "\n"):             # Enter → confirm
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                return ("".join(buf), False)
+            elif ch in ("\x7f", "\x08"):         # Backspace
+                if buf:
+                    buf.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+            elif ch == "\x1b":                  # escape seq (shouldn't reach here)
+                return (None, True)
+            elif ord(ch) >= 32:                 # printable
+                buf.append(ch)
+                sys.stdout.write(ch)
+                sys.stdout.flush()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
 def clear_screen():
     sys.stdout.write("\033[2J\033[H")
     sys.stdout.flush()
@@ -356,8 +392,9 @@ def _tui_add(text: str) -> dict:
                 if not scope or not is_valid_scope(scope):
                     scope = None
                 tags = t.get("tags") or []
+                # Preserve the user's original text — only take metadata from NLP
                 return task_add(
-                    description=t.get("description") or text,
+                    description=text,
                     project=t.get("project") or "inbox",
                     priority_p=_priority_map(str(t.get("priority", "M")).upper()),
                     due=t.get("due") or None,
@@ -514,7 +551,13 @@ def run():
         key = read_key()
 
         if key == "q":
-            break
+            if show_detail or show_full_help or show_sort or show_help:
+                show_detail = False
+                show_full_help = False
+                show_sort = False
+                show_help = False
+            else:
+                break
 
         elif key == "ESC":
             show_help = False
@@ -680,22 +723,20 @@ def run():
 
         elif key == "/":
             show_cursor()
-            sys.stdout.write("  \033[33msearch: \033[0m")
-            sys.stdout.flush()
-            search_query = input().strip()
+            text, cancelled = read_line("  \033[33msearch: \033[0m")
             hide_cursor()
+            if not cancelled and text is not None:
+                search_query = text.strip()
             cursor = 0
             show_detail = False
             pending_key = ""
 
         elif key == "a":
             show_cursor()
-            sys.stdout.write("  \033[33madd task: \033[0m")
-            sys.stdout.flush()
-            new_task = input().strip()
+            text, cancelled = read_line("  \033[33madd task: \033[0m")
             hide_cursor()
-            if new_task:
-                _tui_add(new_task)
+            if not cancelled and text and text.strip():
+                _tui_add(text.strip())
                 tasks = task_list(status="pending", limit=50)
                 display_tasks = tasks
                 if search_query:
