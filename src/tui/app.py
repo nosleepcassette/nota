@@ -852,7 +852,6 @@ def run():
     fuzzy_cursor = 0
     selected: set = set()
     batch_mode = False
-    show_logo = True
     pending_key = ""
 
     term_width = get_term_size().columns
@@ -885,6 +884,13 @@ def run():
 
         frame = []
 
+        # Logo always at top
+        logo = render_logo(term_width)
+        if logo:
+            frame.extend(logo)
+            frame.append("")
+
+        # Hotkey bar below logo
         if HAS_RICH:
             console = Console(force_terminal=True)
             banner = Panel(
@@ -1013,11 +1019,6 @@ def run():
                 frame.append(render_batch_panel(selected_tasks))
 
         else:
-            if show_logo or not display_tasks:
-                logo = render_logo(term_width)
-                if logo:
-                    frame.extend(logo)
-                    frame.append("")
             if not display_tasks:
                 frame.append("  (no tasks)  — press a to add")
             else:
@@ -1047,8 +1048,6 @@ def run():
         sys.stdout.flush()
 
         key = read_key()
-        if show_logo:
-            show_logo = False
 
         if show_edit and edit_task:
             field_def = EDIT_FIELDS[edit_field]
