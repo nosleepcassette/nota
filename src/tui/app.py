@@ -274,7 +274,7 @@ def _build_time_options() -> list:
     today = datetime.date.today()
     for i in range(1, 15):
         d = today + datetime.timedelta(days=i)
-        opts.append(f"{d:%Y-%m-%d} ({d:%a} {d:%b} {d.day})")
+        opts.append(f"{d:%a} {d:%b} {d.day}")
 
     now = datetime.datetime.now()
     base = now.replace(second=0, microsecond=0)
@@ -294,6 +294,20 @@ def _edit_field_options(field_idx: int, edit_pick: list) -> list:
     if ftype == "time":
         return _build_time_options()
     return edit_pick
+
+
+def _edit_initial_col(task: dict, field_idx: int, edit_pick: list) -> int:
+    field_def = EDIT_FIELDS[field_idx]
+    options = _edit_field_options(field_idx, edit_pick)
+    if not options:
+        return 0
+    current = str((task or {}).get(field_def["key"]) or "")
+    if field_def["key"] == "priority":
+        current = str((task or {}).get("priority") or "M")
+    for idx, option in enumerate(options):
+        if str(option).lower() == current.lower():
+            return idx
+    return 0
 
 
 def _edit_current_value(task: dict, field_key: str) -> str:
@@ -1045,13 +1059,13 @@ def run():
             if key in ("h", "LEFT"):
                 edit_field = (edit_field - 1) % len(EDIT_FIELDS)
                 edit_pick = _load_edit_picks(EDIT_FIELDS[edit_field]["key"])
-                edit_col = 0
+                edit_col = _edit_initial_col(edit_task, edit_field, edit_pick)
                 edit_input = ""
                 edit_input_active = False
             elif key in ("l", "RIGHT"):
                 edit_field = (edit_field + 1) % len(EDIT_FIELDS)
                 edit_pick = _load_edit_picks(EDIT_FIELDS[edit_field]["key"])
-                edit_col = 0
+                edit_col = _edit_initial_col(edit_task, edit_field, edit_pick)
                 edit_input = ""
                 edit_input_active = False
             elif key in ("j", "DOWN") and not edit_input_active:
@@ -1087,15 +1101,10 @@ def run():
 
                 edit_field = (edit_field + 1) % len(EDIT_FIELDS)
                 edit_pick = _load_edit_picks(EDIT_FIELDS[edit_field]["key"])
-                edit_col = 0
+                edit_col = _edit_initial_col(edit_task, edit_field, edit_pick)
                 edit_input = ""
                 edit_input_active = False
-            elif key in ("q", "ESC"):
-                show_edit = False
-                edit_task = None
-            elif key == "m":
-                os.system(f"task {edit_task.get('id')} edit")
-                tasks = task_list(status=view_mode, limit=50)
+            elif key == "ESC":
                 show_edit = False
                 edit_task = None
             elif edit_input_active:
@@ -1103,6 +1112,14 @@ def run():
                     edit_input = edit_input[:-1]
                 elif len(key) == 1 and ord(key) >= 32:
                     edit_input += key
+            elif key == "m":
+                os.system(f"task {edit_task.get('id')} edit")
+                tasks = task_list(status=view_mode, limit=50)
+                show_edit = False
+                edit_task = None
+            elif key == "q":
+                show_edit = False
+                edit_task = None
 
             pending_key = ""
             continue
@@ -1357,7 +1374,7 @@ def run():
                 edit_task = task_get(t.get("id"))
                 edit_field = 0
                 edit_pick = _load_edit_picks(EDIT_FIELDS[0]["key"])
-                edit_col = 0
+                edit_col = _edit_initial_col(edit_task, edit_field, edit_pick)
                 edit_input = ""
                 edit_input_active = False
                 show_edit = True
