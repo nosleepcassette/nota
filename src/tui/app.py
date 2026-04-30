@@ -243,12 +243,14 @@ def read_key(timeout: Optional[float] = None) -> str:
 
 
 def hide_cursor():
-    sys.stdout.write("\033[?25l")
+    # Enter alternate screen buffer + hide cursor — eliminates tearing on main screen
+    sys.stdout.write("\033[?1049h\033[?25l")
     sys.stdout.flush()
 
 
 def show_cursor():
-    sys.stdout.write("\033[?25h")
+    # Show cursor + exit alternate screen buffer
+    sys.stdout.write("\033[?25h\033[?1049l")
     sys.stdout.flush()
 
 
@@ -1077,6 +1079,28 @@ def run():
     hide_cursor()
     clear_screen()
 
+    # Pre-render the hotkey banner once; recompute on resize
+    _ui_console = Console(force_terminal=True) if HAS_RICH else None
+
+    def _make_banner_lines(width: int) -> List[str]:
+        if not HAS_RICH or not _ui_console:
+            return [
+                "  (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (p)omo  (s)ort  (f)ilter  (x)select  (q)uit",
+                "─" * width,
+            ]
+        _bc = Console(force_terminal=True, width=width)
+        _bp = Panel(
+            "(a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (p)omo  (s)ort  (f)ilter  (x)select  (q)uit",
+            border_style=AMBER,
+            box=box.ROUNDED,
+            padding=(0, 2),
+        )
+        with _bc.capture() as _cap:
+            _bc.print(_bp)
+        return _cap.get().split("\n")
+
+    cached_banner_lines = _make_banner_lines(term_width)
+
     def current_display_tasks() -> List[Dict]:
         display = tasks
         if search_query:
@@ -1098,8 +1122,7 @@ def run():
         if _term_resized:
             term_width = get_term_size().columns
             _term_resized = False
-            sys.stdout.write("\033[2J\033[H")
-            sys.stdout.flush()
+            cached_banner_lines = _make_banner_lines(term_width)
 
         display_tasks = current_display_tasks()
 
@@ -1114,23 +1137,8 @@ def run():
             frame.extend(logo)
             frame.append("")
 
-        # Hotkey bar below logo
-        if HAS_RICH:
-            console = Console(force_terminal=True)
-            banner = Panel(
-                "(a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (p)omo  (s)ort  (f)ilter  (x)select  (q)uit",
-                border_style=AMBER,
-                box=box.ROUNDED,
-                padding=(0, 2),
-            )
-            with console.capture() as cap:
-                console.print(banner)
-            frame.extend(cap.get().split("\n"))
-        else:
-            frame.append(
-                "  (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (p)omo  (s)ort  (f)ilter  (x)select  (q)uit"
-            )
-            frame.append("─" * term_width)
+        # Hotkey bar below logo — use pre-rendered cached lines
+        frame.extend(cached_banner_lines)
 
         sort_indicator = (
             f" \033[33msorted by {sort_by}"
@@ -1172,9 +1180,8 @@ def run():
                     box=box.ROUNDED,
                     padding=(1, 2),
                 )
-                console = Console(force_terminal=True)
-                with console.capture() as cap:
-                    console.print(sort_panel)
+                with _ui_console.capture() as cap:
+                    _ui_console.print(sort_panel)
                 frame.extend(cap.get().split("\n"))
             else:
                 frame.append(render_sort_menu())
@@ -1189,9 +1196,8 @@ def run():
                     box=box.ROUNDED,
                     padding=(1, 2),
                 )
-                console = Console(force_terminal=True)
-                with console.capture() as cap:
-                    console.print(help_panel)
+                with _ui_console.capture() as cap:
+                    _ui_console.print(help_panel)
                 frame.extend(cap.get().split("\n"))
             else:
                 frame.append(render_help())
@@ -1205,9 +1211,8 @@ def run():
                     padding=(1, 2),
                     box=box.ROUNDED,
                 )
-                console = Console(force_terminal=True)
-                with console.capture() as cap:
-                    console.print(detail)
+                with _ui_console.capture() as cap:
+                    _ui_console.print(detail)
                 frame.extend(cap.get().split("\n"))
             else:
                 frame.append(render_task_detail(detail_task))
@@ -1235,9 +1240,8 @@ def run():
                     padding=(1, 2),
                     box=box.ROUNDED,
                 )
-                console = Console(force_terminal=True)
-                with console.capture() as cap:
-                    console.print(batch_panel)
+                with _ui_console.capture() as cap:
+                    _ui_console.print(batch_panel)
                 frame.extend(cap.get().split("\n"))
             else:
                 frame.append(render_batch_panel(selected_tasks))
@@ -1286,10 +1290,7 @@ def run():
         status_line += "\033[33m]\033[0m"
         frame.append(status_line)
 
-        output = render_frame_output(frame)
-        sys.stdout.write("\033[H")
-        sys.stdout.write(output)
-        sys.stdout.write("\033[J")
+        sys.stdout.write("\033[H" + render_frame_output(frame) + "\033[J")
         sys.stdout.flush()
 
         key = read_key(1 if pomo_state.get("active") and not pomo_state.get("paused") else None)
