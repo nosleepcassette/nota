@@ -299,6 +299,11 @@ def clear_screen():
     sys.stdout.flush()
 
 
+def render_frame_output(frame: List[str]) -> str:
+    """Build terminal output for one frame, clearing every touched line."""
+    return "\n".join(f"{line}\033[0m\033[K" for line in frame)
+
+
 def get_term_size():
     try:
         return os.get_terminal_size()
@@ -1070,6 +1075,7 @@ def run():
     term_width = get_term_size().columns
 
     hide_cursor()
+    clear_screen()
 
     def current_display_tasks() -> List[Dict]:
         display = tasks
@@ -1280,7 +1286,7 @@ def run():
         status_line += "\033[33m]\033[0m"
         frame.append(status_line)
 
-        output = "\n".join(frame)
+        output = render_frame_output(frame)
         sys.stdout.write("\033[H")
         sys.stdout.write(output)
         sys.stdout.write("\033[J")
