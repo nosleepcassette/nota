@@ -9,6 +9,8 @@ Syntax reference:
   task title #tag               add tag (multiple ok)
   task title scope:meatspace    set scope
   task title due:2026-04-10     due date (stored as string; no parsing in MVP)
+  task title recur:daily        recurring task frequency
+  task title until:2026-05-10   recurrence end date
   parent -> child               parent DEPENDS ON child (child is prerequisite)
   task A :: task B              task A is RELATED TO task B
 
@@ -37,6 +39,9 @@ def _looks_freeform(text: str) -> bool:
         or "::" in t
         or "->" in t
         or "scope:" in t.lower()
+        or "recur:" in t.lower()
+        or "until:" in t.lower()
+        or "due:" in t.lower()
         or any(f" {p}" in t.lower() or t.lower().startswith(f"{p} ") for p in ("p1", "p2", "p3", "p4"))
     )
     return not has_syntax and len(t.split()) >= 4
@@ -61,6 +66,8 @@ def parse_inline(text: str) -> Dict[str, Any]:
           scope:          str   — scope string or ''
           tags:           list  — list of tag strings
           due_date:       str|None
+          recur:          str|None
+          until:          str|None
         }
 
     Dependency direction:
@@ -90,6 +97,8 @@ def parse_inline(text: str) -> Dict[str, Any]:
     scope = ""
     tags: List[str] = []
     due_date = None
+    recur = None
+    until = None
     tokens_to_remove: List[str] = []
 
     for token in text.split():
@@ -115,6 +124,12 @@ def parse_inline(text: str) -> Dict[str, Any]:
             due_raw = token[4:]
             due_date = parse_nl_date(due_raw) or due_raw  # parse NL, fallback to raw
             tokens_to_remove.append(token)
+        elif low.startswith("recur:"):
+            recur = token[6:]
+            tokens_to_remove.append(token)
+        elif low.startswith("until:"):
+            until = token[6:]
+            tokens_to_remove.append(token)
 
     for tok in tokens_to_remove:
         # Replace whole-word occurrences only
@@ -131,4 +146,6 @@ def parse_inline(text: str) -> Dict[str, Any]:
         "scope": scope,
         "tags": tags,
         "due_date": due_date,
+        "recur": recur,
+        "until": until,
     }

@@ -155,6 +155,12 @@ def read_line(prompt: str) -> tuple:
     sys.stdout.write(prompt)
     sys.stdout.flush()
 
+    if not sys.stdin.isatty():
+        try:
+            return (input(), False)
+        except EOFError:
+            return ("", True)
+
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     buf = []
@@ -220,14 +226,17 @@ def sort_tasks(tasks: List[Dict], sort_by: str, reverse: bool = False) -> List[D
     return sorted(tasks, key=get_sort_key, reverse=reverse)
 
 
-def render_table_plain(tasks: List[Dict], cursor: int, width: int) -> List[str]:
+def render_table_plain(
+    tasks: List[Dict], cursor: int, width: int, selected_ids: Optional[set] = None
+) -> List[str]:
     lines = []
     header = f"{'ID':<4} {'Pri':<3} {'Due':<7} {'Proj':<8} {'Scope':<8} Description"
     lines.append(header)
     lines.append("─" * width)
+    selected_ids = selected_ids or set()
 
     for i, t in enumerate(tasks):
-        marker = ">" if i == cursor else " "
+        marker = ">" if i == cursor else ("x" if t.get("id") in selected_ids else " ")
         pri = t.get("priority", "")
         pri_display = {"H": "!!!", "M": "!!", "L": "~", "": "-"}.get(pri, "-")
         due_display, _ = _due_display(t)
@@ -242,9 +251,12 @@ def render_table_plain(tasks: List[Dict], cursor: int, width: int) -> List[str]:
     return lines
 
 
-def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[str]:
+def render_tasks_table(
+    tasks: list, cursor: int = 0, width: int = 80, selected_ids: Optional[set] = None
+) -> List[str]:
     if not tasks:
         return ["  (no tasks)"]
+    selected_ids = selected_ids or set()
 
     if HAS_RICH:
         w = width
@@ -279,7 +291,9 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
             pri_display = {"H": "!!!", "M": "!!", "L": "~", "": "-"}.get(pri, "-")
 
             status = t.get("status", "pending")
-            if status == "completed":
+            if t.get("id") in selected_ids:
+                prefix = f"[{AMBER}]x[/{AMBER}]"
+            elif status == "completed":
                 prefix = f"[{AMBER}]+[/{AMBER}]"
             elif status == "waiting":
                 prefix = f"[{AMBER}]~[/{AMBER}]"
@@ -318,7 +332,64 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
         lines = cap.get().split("\n")
         return lines
     else:
-        return render_table_plain(tasks, cursor, width)
+        return render_table_plain(tasks, cursor, width, selected_ids)
+
+
+def render_batch_panel(selected_tasks: List[Dict]) -> str:
+    lines = [
+        "  [bold amber]Batch[/bold amber]",
+        f"    {len(selected_tasks)} selected",
+        "",
+    ]
+    for t in selected_tasks[:12]:
+        lines.append(f"    x [{t.get('id','?')}] {t.get('description','')}")
+    if len(selected_tasks) > 12:
+        lines.append(f"    ... {len(selected_tasks) - 12} more")
+    lines.extend([
+        "",
+        "    c complete selected   q back",
+    ])
+    return "\n".join(lines)
+
+
+def _dependency_detail_lines(t: dict, rich: bool) -> List[str]:
+    lines: List[str] = []
+    depends = t.get("depends") or []
+    if depends:
+        lines.append(
+            f"  [bold {AMBER}]Depends on (prerequisites)[/]"
+            if rich
+            else "  Depends on (prerequisites):"
+        )
+        for dep_uuid in depends:
+            try:
+                from src.tw import _run_json
+
+                found = _run_json(f"uuid:{dep_uuid}", "export")
+                if found:
+                    d = found[0]
+                    if rich:
+                        mark = "[green]✓[/green]" if d.get("status") == "completed" else "[yellow]○[/yellow]"
+                    else:
+                        mark = "✓" if d.get("status") == "completed" else "○"
+                    lines.append(f"    {mark} [{d.get('id','?')}] {d.get('description','')}")
+            except Exception:
+                lines.append(f"    ○ (uuid: {str(dep_uuid)[:8]}...)")
+
+    this_uuid = t.get("uuid", "")
+    if this_uuid:
+        try:
+            from src.tw import _run_json
+
+            blocking = _run_json(f"depends.is:{this_uuid}", "export") or []
+            if blocking:
+                lines.append(f"  [bold {AMBER}]Blocks[/]" if rich else "  Blocks:")
+                for b in blocking:
+                    lines.append(f"    → [{b.get('id','?')}] {b.get('description','')}")
+        except Exception:
+            pass
+
+    return lines
 
 
 def render_task_detail(t) -> str:
@@ -356,6 +427,8 @@ def render_task_detail(t) -> str:
                         pass
                 lines.append(f"    {date_str}{desc}")
 
+        lines.extend(_dependency_detail_lines(t, rich=True))
+
         return "\n".join(lines)
     else:
         lines = [
@@ -388,15 +461,17 @@ def render_task_detail(t) -> str:
                         pass
                 lines.append(f"    {date_str}{desc}")
 
+        lines.extend(_dependency_detail_lines(t, rich=False))
+
         return "\n".join(lines)
 
 
 def render_help() -> str:
     return """
   [bold]Commands[/bold]
-    (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (f)ilter  (q)uit
+    (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (f)ilter  (x)select  (q)uit
 
-  [dim]DUE column shows countdowns; detail view includes annotations.[/dim]
+  [dim]DUE column shows countdowns; detail view includes notes and dependencies.[/dim]
 
   [dim]press ? for full help[/dim]
 """
@@ -418,13 +493,14 @@ def render_full_help() -> str:
     e               edit task (opens in editor)
     / or r          search tasks
     f / F           filter by project / clear project filter
+    x / B           select task / batch selected tasks
     s               sort menu
     ?               toggle this help
     q               quit
 
   [bold amber]Display[/bold amber]
     DUE column      countdown: today, tmrw, 3d, 05/12, or overdue
-    Detail view     shows task annotations under Notes
+    Detail view     shows task annotations, prerequisites, and blocked tasks
 
   [bold amber]Sort options[/bold amber]
     s p             sort by project
@@ -512,6 +588,8 @@ def run():
     detail_task = None
     search_query = ""
     filter_project = ""
+    selected: set = set()
+    batch_mode = False
     pending_key = ""
 
     term_width = get_term_size().columns
@@ -546,7 +624,7 @@ def run():
         if HAS_RICH:
             console = Console(force_terminal=True)
             banner = Panel(
-                "(a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (f)ilter  (q)uit  (g)o top/bot",
+                "(a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (f)ilter  (x)select  (q)uit",
                 border_style=AMBER,
                 box=box.ROUNDED,
                 padding=(0, 2),
@@ -556,7 +634,7 @@ def run():
             frame.extend(cap.get().split("\n"))
         else:
             frame.append(
-                "  (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (f)ilter  (q)uit  (g)o top/bot"
+                "  (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (f)ilter  (x)select  (q)uit"
             )
             frame.append("─" * term_width)
 
@@ -620,8 +698,25 @@ def run():
             else:
                 frame.append(render_task_detail(detail_task))
 
+        elif batch_mode:
+            selected_tasks = [t for t in tasks if t.get("id") in selected]
+            if HAS_RICH:
+                batch_panel = Panel(
+                    render_batch_panel(selected_tasks),
+                    title="\033[1;33mbatch\033[0m",
+                    border_style=AMBER,
+                    padding=(1, 2),
+                    box=box.ROUNDED,
+                )
+                console = Console(force_terminal=True)
+                with console.capture() as cap:
+                    console.print(batch_panel)
+                frame.extend(cap.get().split("\n"))
+            else:
+                frame.append(render_batch_panel(selected_tasks))
+
         else:
-            table_lines = render_tasks_table(display_tasks, cursor, term_width)
+            table_lines = render_tasks_table(display_tasks, cursor, term_width, selected)
             frame.extend(table_lines)
 
         frame.append("")
@@ -629,6 +724,8 @@ def run():
         if search_query:
             status_line += f" search: {search_query}  │"
         status_line += f" {len(display_tasks)} tasks"
+        if selected:
+            status_line += f"  │ selected: {len(selected)}"
         if filter_project:
             status_line += f"  │ project: {filter_project}  (F to clear)"
         if show_detail:
@@ -644,6 +741,27 @@ def run():
         sys.stdout.flush()
 
         key = read_key()
+
+        if batch_mode:
+            if key in ("q", "ESC"):
+                batch_mode = False
+            elif key == "c":
+                show_cursor()
+                text, cancelled = read_line(
+                    f"  \033[33mcomplete {len(selected)} selected? [y/N]: \033[0m"
+                )
+                hide_cursor()
+                if not cancelled and text and text.strip().lower() in ("y", "yes"):
+                    for tid in list(selected):
+                        task_done(tid)
+                    selected.clear()
+                    tasks = task_list(status="pending", limit=50)
+                    display_tasks = current_display_tasks()
+                    if cursor >= len(display_tasks):
+                        cursor = max(0, len(display_tasks) - 1)
+                    batch_mode = False
+            pending_key = ""
+            continue
 
         if key == "q":
             if show_detail or show_full_help or show_sort or show_help:
@@ -734,6 +852,7 @@ def run():
             if display_tasks and cursor < len(display_tasks):
                 t = display_tasks[cursor]
                 task_delete(t.get("id"))
+                selected.discard(t.get("id"))
                 tasks = task_list(status="pending", limit=50)
                 display_tasks = current_display_tasks()
                 if cursor >= len(display_tasks):
@@ -744,6 +863,7 @@ def run():
             if display_tasks and cursor < len(display_tasks):
                 t = display_tasks[cursor]
                 task_done(t.get("id"))
+                selected.discard(t.get("id"))
                 tasks = task_list(status="pending", limit=50)
                 display_tasks = current_display_tasks()
                 if cursor >= len(display_tasks):
@@ -757,10 +877,30 @@ def run():
             if display_tasks and cursor < len(display_tasks):
                 t = display_tasks[cursor]
                 task_delete(t.get("id"))
+                selected.discard(t.get("id"))
                 tasks = task_list(status="pending", limit=50)
                 display_tasks = current_display_tasks()
                 if cursor >= len(display_tasks):
                     cursor = max(0, len(display_tasks) - 1)
+            pending_key = ""
+
+        elif key == "x":
+            if display_tasks and cursor < len(display_tasks):
+                tid = display_tasks[cursor].get("id")
+                if tid in selected:
+                    selected.discard(tid)
+                else:
+                    selected.add(tid)
+                if cursor < len(display_tasks) - 1:
+                    cursor += 1
+            pending_key = ""
+
+        elif key == "B":
+            if selected:
+                batch_mode = True
+                show_detail = False
+                show_help = False
+                show_sort = False
             pending_key = ""
 
         elif key in ("\n", "ENTER"):
