@@ -425,25 +425,88 @@ def cmd_list(args):
 
 
 def cmd_next(args):
-    tasks = task_next(limit=args.limit)
+    import datetime
+
     if args.json:
+        tasks = task_next(limit=args.limit)
         print(json.dumps(tasks))
         return
-    inbox = task_list(project="inbox", status="pending")
-    if inbox:
-        print(f"⟡ inbox: {len(inbox)} unprocessed  →  nota triage\n")
-    try:
-        overdue = _run_json("status:pending", "due.before:today", "export")
-        if overdue:
-            print(f"⟡ overdue: {len(overdue)} tasks\n")
-    except Exception:
-        pass
-    if not tasks:
+
+    tasks = task_list(status="pending", limit=100)
+    today = datetime.date.today()
+    this_week = today + datetime.timedelta(days=7)
+
+    overdue, due_today, high_pri, this_week_tasks, inbox, rest = [], [], [], [], [], []
+
+    def due_date(t):
+        due = str(t.get("due") or "")
+        if not due:
+            return None
+        try:
+            if len(due) >= 15 and due[:8].isdigit() and due[8] == "T":
+                dt = datetime.datetime.strptime(due[:15], "%Y%m%dT%H%M%S")
+                if due.endswith("Z"):
+                    dt = dt.replace(tzinfo=datetime.UTC).astimezone()
+                return dt.date()
+            if len(due) >= 8 and due[:8].isdigit():
+                return datetime.date(int(due[:4]), int(due[4:6]), int(due[6:8]))
+            if len(due) >= 10:
+                iso = due[:19].replace("Z", "+00:00")
+                dt = datetime.datetime.fromisoformat(iso)
+                if dt.tzinfo:
+                    dt = dt.astimezone()
+                return dt.date()
+        except Exception:
+            return None
+        return None
+
+    for t in tasks:
+        due = due_date(t)
+        pri = t.get("priority", "")
+        project = t.get("project") or ""
+
+        if due and due < today:
+            overdue.append(t)
+        elif due == today:
+            due_today.append(t)
+        elif pri == "H":
+            high_pri.append(t)
+        elif due and due <= this_week:
+            this_week_tasks.append(t)
+        elif not project:
+            inbox.append(t)
+        else:
+            rest.append(t)
+
+    if not any([overdue, due_today, high_pri, this_week_tasks, inbox, rest]):
         print("Nothing ready.")
         return
-    print("\n── next (by urgency) ──")
-    for t in tasks:
-        print(fmt_row(t))
+
+    def fmt(t):
+        tid = t.get("id", "?")
+        desc = t.get("description", "")[:50]
+        proj = f"  @{t['project']}" if t.get("project") else ""
+        scope = f"  scope:{t['scope']}" if t.get("scope") else ""
+        due = due_date(t)
+        due_str = f"  due:{due.isoformat()}" if due else ""
+        return f"  [{tid}] {desc}{proj}{scope}{due_str}"
+
+    def section(title, items, total=None):
+        if not items:
+            return
+        count = total if total is not None else len(items)
+        print(f"\n── {title} ({count}) " + "─" * max(0, 44 - len(title) - 5))
+        for t in items[:10]:
+            print(fmt(t))
+
+    section("OVERDUE", overdue)
+    section("DUE TODAY", due_today)
+    section("HIGH PRIORITY", high_pri)
+    section("THIS WEEK", this_week_tasks)
+    section("INBOX", inbox)
+    if rest:
+        section("OTHER", rest[:5], total=len(rest))
+    print()
 
 
 def cmd_blocked(args):

@@ -28,12 +28,49 @@ Taskwarrior field reference (what we use):
 import json
 import subprocess
 import sys
+import datetime
 from typing import Any, Dict, List, Optional
 
 
 TASK_BIN = "task"
 PRIORITY_FROM_P = {"p1": "H", "p2": "H", "p3": "M", "p4": "L", "": ""}
 PRIORITY_TO_LABEL = {"H": "!!!!", "M": "!!", "L": "~", "": ""}
+
+
+def _normalize_due_end_of_day(due: Optional[str]) -> Optional[str]:
+    """Shift date-only due values to 23:59 so they don't expire at midnight."""
+    if not due:
+        return due
+    value = str(due).strip()
+    if not value:
+        return value
+    lower = value.lower()
+    if ":" in value or "T" in value or "am" in lower or "pm" in lower:
+        return value
+    today = datetime.date.today()
+    shortcuts = {
+        "today": today,
+        "eod": today,
+        "tomorrow": today + datetime.timedelta(days=1),
+    }
+    if lower in shortcuts:
+        return shortcuts[lower].strftime("%Y-%m-%dT23:59")
+    if lower == "end of week":
+        return "eow"
+    if lower in {"eow", "eom", "eoq", "eoy"}:
+        return value
+    try:
+        import dateparser
+
+        parsed = dateparser.parse(
+            value,
+            settings={"STRICT_PARSING": False, "PREFER_DATES_FROM": "future"},
+        )
+        if parsed:
+            return parsed.strftime("%Y-%m-%dT23:59")
+    except Exception:
+        pass
+    return value
 
 
 # ── low-level subprocess ───────────────────────────────────────────────────────
@@ -123,6 +160,7 @@ def task_add(
         if pri:
             args.append(f"priority:{pri}")
     if due:
+        due = _normalize_due_end_of_day(due)
         args.append(f"due:{due}")
     if wait:
         args.append(f"wait:{wait}")
@@ -267,7 +305,8 @@ def task_modify(task_id: int, **kwargs) -> Optional[Dict[str, Any]]:
         pri = PRIORITY_FROM_P.get(kwargs["priority_p"], "")
         args.append(f"priority:{pri}")
     if "due" in kwargs:
-        args.append(f"due:{kwargs['due']}")
+        due_val = _normalize_due_end_of_day(kwargs["due"])
+        args.append(f"due:{due_val}")
     if "scope" in kwargs:
         args.append(f"scope:{kwargs['scope']}")
     if "description" in kwargs:

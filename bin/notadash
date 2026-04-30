@@ -7,8 +7,8 @@
 # Layout:
 #   |  burndown.daily           |  nota bene (interactive TUI)      |
 #   |                           |                                    |
-#   |  task next (watch 30s)    |                                    |
-#   |  task overdue (watch 60s) |                                    |
+#   |  task next (refresh 30s)  |                                    |
+#   |  task overdue (refresh 60s) |                                  |
 #   |  task calendar (full width, bottom strip)                      |
 #
 # Usage:
@@ -43,8 +43,8 @@ _pane_cmd() {
     burndown) print "clear; task burndown.daily" ;;
     calendar) print "clear; task calendar" ;;
     bene)     print "nota bene" ;;
-    next)     print "clear; task next" ;;
-    overdue)  print "clear; task overdue" ;;
+    next)     print "while true; do clear; task next; sleep 30; done" ;;
+    overdue)  print "while true; do clear; task overdue; sleep 60; done" ;;
     *) return 1 ;;
   esac
 }
@@ -190,17 +190,19 @@ tmux select-pane -t "$P_bene"    -T "nota bene"
 tmux select-pane -t "$P_next"    -T "next"
 tmux select-pane -t "$P_overdue" -T "overdue"
 
+sleep 0.3
+
 # ── send commands ─────────────────────────────────────────────────────────────
 
 tmux send-keys -t "$P_burn"    -l -- "clear; task burndown.daily"
 tmux send-keys -t "$P_burn"    Enter
 tmux send-keys -t "$P_cal"     -l -- "clear; task calendar"
 tmux send-keys -t "$P_cal"     Enter
-tmux send-keys -t "$P_bene"    -l -- "nota bene"
+tmux send-keys -t "$P_bene"    -l -- "source ~/.zshrc 2>/dev/null; nota bene"
 tmux send-keys -t "$P_bene"    Enter
-tmux send-keys -t "$P_next"    -l -- "clear; watch -n30 'task next'"
+tmux send-keys -t "$P_next"    -l -- "while true; do clear; task next; sleep 30; done"
 tmux send-keys -t "$P_next"    Enter
-tmux send-keys -t "$P_overdue" -l -- "clear; watch -n60 'task overdue'"
+tmux send-keys -t "$P_overdue" -l -- "while true; do clear; task overdue; sleep 60; done"
 tmux send-keys -t "$P_overdue" Enter
 
 # ── session-scoped keybinds ───────────────────────────────────────────────────

@@ -66,6 +66,52 @@ EDIT_FIELDS = [
 ]
 
 
+def _pomo_notify(task_name: str) -> None:
+    """Fire a macOS notification. No-op if osascript is unavailable."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("osascript"):
+        return
+    safe_name = str(task_name).replace('"', '\\"')
+    msg = f"Pomo complete: {safe_name}"
+    subprocess.Popen(
+        [
+            "osascript",
+            "-e",
+            f'display notification "{msg}" with title "nota bene" sound name "Glass"',
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _pomo_tick(state: dict) -> None:
+    """Update Pomodoro countdown state and finish/annotate at zero."""
+    if not state.get("active") or state.get("paused"):
+        return
+    start = state.get("start_time")
+    if start is None:
+        return
+    elapsed = (datetime.datetime.now() - start).total_seconds() + state.get("elapsed_secs", 0)
+    remaining = max(0, state.get("duration_secs", 25 * 60) - elapsed)
+    state["remaining_secs"] = remaining
+
+    if remaining == 0 and not state.get("notified"):
+        state["notified"] = True
+        state["active"] = False
+        _pomo_notify(state.get("task_name", "pomo"))
+        task_id = state.get("task_id")
+        if task_id:
+            try:
+                from src.tw import _run as _tw_run
+
+                ts = datetime.datetime.now().strftime("%H:%M")
+                _tw_run(str(task_id), "annotate", f"pomo complete {ts}")
+            except Exception:
+                pass
+
+
 def _load_tui_state() -> dict:
     try:
         if _TUI_STATE_PATH.exists():
@@ -83,19 +129,39 @@ def _save_tui_state(state: dict) -> None:
         pass
 
 
+def _due_value_date_iso(due: str) -> str:
+    due = str(due or "")
+    if not due:
+        return ""
+    try:
+        if len(due) >= 15 and due[:8].isdigit() and due[8] == "T":
+            dt = datetime.datetime.strptime(due[:15], "%Y%m%dT%H%M%S")
+            if due.endswith("Z"):
+                dt = dt.replace(tzinfo=datetime.timezone.utc).astimezone()
+            return dt.date().isoformat()
+        if len(due) >= 8 and due[:8].isdigit():
+            return f"{due[:4]}-{due[4:6]}-{due[6:8]}"
+        if len(due) >= 10:
+            iso = due[:19].replace("Z", "+00:00")
+            dt = datetime.datetime.fromisoformat(iso)
+            if dt.tzinfo:
+                dt = dt.astimezone()
+            return dt.date().isoformat()
+    except Exception:
+        pass
+    return ""
+
+
 def _due_display(task: dict) -> tuple:
     """Returns (display_str, style) for due date column."""
     due = task.get("due") or task.get("dueDate") or ""
     if not due:
         return "-", ""
     try:
-        due = str(due)
-        if due[:8].isdigit():
-            dt = datetime.datetime.strptime(due[:8], "%Y%m%d").date()
-        elif len(due) >= 10:
-            dt = datetime.date.fromisoformat(due[:10])
-        else:
+        due_iso = _due_value_date_iso(str(due))
+        if not due_iso:
             return due[:5], ""
+        dt = datetime.date.fromisoformat(due_iso)
         today = datetime.date.today()
         delta = (dt - today).days
         if delta < 0:
@@ -119,7 +185,7 @@ def strip_markup(text: str) -> str:
     )
 
 
-def read_key() -> str:
+def read_key(timeout: Optional[float] = None) -> str:
     if not sys.stdin.isatty():
         try:
             text = input().strip()
@@ -148,6 +214,10 @@ def read_key() -> str:
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
+        if timeout is not None:
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+            if not ready:
+                return ""
         ch = sys.stdin.read(1)
 
         if ch == "\x1b":
@@ -272,7 +342,7 @@ def _load_edit_picks(field_key: str) -> list:
 def _build_time_options() -> list:
     opts = ["clear", "today", "tomorrow", "end of week"]
     today = datetime.date.today()
-    for i in range(1, 15):
+    for i in range(1, 61):
         d = today + datetime.timedelta(days=i)
         opts.append(f"{d:%a} {d:%b} {d.day}")
 
@@ -365,7 +435,7 @@ def render_edit_panel(
 
     lines.extend([
         "",
-        "j/k options   h/l fields   tab input   enter commit   esc cancel",
+        "h/l ←/→ field   j/k pick   tab text   enter commit   w save+close   ESC cancel   m editor",
     ])
 
     if HAS_RICH:
@@ -405,7 +475,12 @@ def _apply_edit_field(task: dict, field_key: str, value: str) -> None:
         pri_map = {"H": "p1", "M": "p3", "L": "p4"}
         task_modify(task_id, priority_p=pri_map.get(value.upper(), "p3"))
     elif field_key == "due":
-        task_modify(task_id, due="" if value.lower() in ("clear", "-", "") else value)
+        if value.lower() in ("clear", "-", ""):
+            task_modify(task_id, due="")
+        else:
+            from src.tw import _normalize_due_end_of_day
+
+            task_modify(task_id, due=_normalize_due_end_of_day(value))
     elif field_key == "tags":
         new_tags = [tag.strip() for tag in value.replace(",", " ").split() if tag.strip()]
         old_tags = task.get("tags") or []
@@ -460,7 +535,7 @@ def sort_tasks(tasks: List[Dict], sort_by: str, reverse: bool = False) -> List[D
             prio = t.get("priority", "")
             return {"H": 0, "M": 1, "L": 2, "": 3}.get(prio, 3)
         elif sort_by == "due":
-            return t.get("due") or ""
+            return t.get("due") or "~"
         elif sort_by == "description":
             return (t.get("description") or "").lower()
         elif sort_by == "status":
@@ -510,7 +585,7 @@ def render_tasks_table(
         due_w = 7
         proj_w = 10
         scope_w = 10
-        desc_w = w - id_w - pri_w - proj_w - scope_w - due_w - 12
+        desc_w = max(12, w - id_w - pri_w - proj_w - scope_w - due_w - 12)
 
         table = Table(
             show_header=True,
@@ -578,6 +653,33 @@ def render_tasks_table(
         return lines
     else:
         return render_table_plain(tasks, cursor, width, selected_ids)
+
+
+def render_dashboard_table(
+    tasks: list, cursor: int = 0, width: int = 80, selected_ids: Optional[set] = None
+) -> List[str]:
+    """Compact ANSI table for the dashboard left pane."""
+    selected_ids = selected_ids or set()
+    width = max(34, width)
+    desc_w = max(8, width - 31)
+    lines = [
+        f" {'ID':>3} {'Pri':<3} {'Project':<10} {'Due':<7} {'Description':<{desc_w}}"[:width],
+        "\033[33m" + "─" * width + "\033[0m",
+    ]
+    for i, t in enumerate(tasks):
+        tid = str(t.get("id", "?"))[:3]
+        pri = {"H": "!!!", "M": "!!", "L": "~", "": "-"}.get(t.get("priority", ""), "-")
+        proj = (t.get("project") or "inbox")[:10]
+        due_display, due_style = _due_display(t)
+        desc = (t.get("description") or "")[:desc_w]
+        marker = "x" if t.get("id") in selected_ids else " "
+        row = f"{marker}{tid:>3} {pri:<3} {proj:<10} {due_display:<7} {desc:<{desc_w}}"[:width]
+        if i == cursor:
+            row = f"\033[7m{row}\033[0m"
+        elif due_style:
+            row = f"\033[{ '31' if 'red' in due_style else '33' }m{row}\033[0m"
+        lines.append(row)
+    return lines
 
 
 def render_batch_panel(selected_tasks: List[Dict]) -> str:
@@ -714,7 +816,7 @@ def render_task_detail(t) -> str:
 def render_help() -> str:
     return """
   [bold]Commands[/bold]
-    (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (ctrl+f)uzzy  (q)uit
+    (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (p)omo  (ctrl+f)uzzy  (q)uit
 
   [dim]DUE column shows countdowns; detail view includes notes and dependencies.[/dim]
 
@@ -731,6 +833,11 @@ def render_full_help() -> str:
     gg              go to top
     G               go to bottom
 
+  [bold amber]Dashboard[/bold amber]
+    \\              toggle split-pane dashboard mode
+    p               start 25-min pomo on focused task
+    P               pause / resume active pomo
+
   [bold amber]Actions[/bold amber]
     enter or v      view task detail
     c               mark complete
@@ -745,6 +852,11 @@ def render_full_help() -> str:
     s               sort menu
     ?               toggle this help
     q               quit
+
+  [bold amber]Smart edit changes[/bold amber]
+    w               save current field + close edit panel
+    ESC (in text)   clear text input (don't close)
+    ESC (no text)   close edit panel without saving
 
   [bold amber]Display[/bold amber]
     DUE column      countdown: today, tmrw, 3d, 05/12, or overdue
@@ -820,6 +932,93 @@ def _tui_add(text: str) -> dict:
     )
 
 
+def _task_due_date_iso(task: dict) -> str:
+    return _due_value_date_iso(str(task.get("due") or ""))
+
+
+def render_header_bar(tasks: list, pomo_state: dict, term_width: int) -> str:
+    """Render the top status bar: counts plus Pomodoro timer."""
+    today_str = datetime.date.today().isoformat()
+    due_today = sum(1 for t in tasks if _task_due_date_iso(t) == today_str)
+    overdue = sum(1 for t in tasks if (due := _task_due_date_iso(t)) and due < today_str)
+    inbox = sum(1 for t in tasks if not t.get("project"))
+    total = len(tasks)
+
+    parts = [
+        f"\033[1;33m NOTA BENE \033[0m",
+        f"\033[33m│\033[0m",
+        f" {total} open",
+    ]
+    if due_today:
+        parts.append(f"  \033[33m{due_today} due today\033[0m")
+    if overdue:
+        parts.append(f"  \033[31m{overdue} overdue\033[0m")
+    if inbox:
+        parts.append(f"  \033[33m{inbox} inbox\033[0m")
+
+    if pomo_state.get("active"):
+        remaining = int(pomo_state.get("remaining_secs", 0))
+        mins, secs = divmod(max(0, remaining), 60)
+        duration = max(1, int(pomo_state.get("duration_secs", 25 * 60)))
+        filled = max(0, min(10, int((1 - remaining / duration) * 10)))
+        bar = "▓" * filled + "░" * (10 - filled)
+        paused = " PAUSED" if pomo_state.get("paused") else ""
+        task_name = str(pomo_state.get("task_name", ""))[:20]
+        parts.append(
+            f"  \033[1;31m● POMO{paused} [{bar}] {mins:02d}:{secs:02d} {task_name}\033[0m"
+        )
+
+    return "".join(parts)
+
+
+def render_detail_pane(task: Optional[dict], width: int) -> list:
+    """Render task detail as width-constrained lines for the dashboard pane."""
+    lines: List[str] = []
+    width = max(20, width)
+    if not task:
+        return [" (no task selected)"]
+
+    def w(text: str = "") -> None:
+        import re
+
+        plain = re.sub(r"\[/?[^\]]*\]", "", str(text))
+        lines.append((" " + plain)[:width])
+
+    w(f"[{task.get('id')}] {task.get('description', '')}")
+    w("─" * (width - 2))
+    w(f"project: {task.get('project') or '(inbox)'}")
+    priority_label = {"H": "!!! urgent", "M": "!! high", "L": "~ low", "": "(none)"}.get(
+        task.get("priority", ""), "(none)"
+    )
+    w(f"priority: {priority_label}")
+    if task.get("due"):
+        due_disp, _ = _due_display(task)
+        w(f"due: {due_disp}")
+    else:
+        w("due: (none)")
+    w(f"scope: {task.get('scope') or '(none)'}")
+
+    tags = task.get("tags") or []
+    if tags:
+        w(f"tags: {' '.join('#' + tag for tag in tags)}")
+
+    annotations = task.get("annotations") or []
+    if annotations:
+        w("─" * (width - 2))
+        for ann in annotations[-4:]:
+            note = (ann.get("description") or "")[: max(0, width - 6)]
+            w(f"  · {note}")
+    else:
+        w("[no annotations]")
+
+    deps = task.get("depends") or []
+    if deps:
+        w("─" * (width - 2))
+        w(f"depends on: {', '.join(str(d) for d in deps)}")
+
+    return lines
+
+
 def run():
     from src.tw import task_list, task_get, task_done, task_add, task_delete
 
@@ -852,6 +1051,20 @@ def run():
     fuzzy_cursor = 0
     selected: set = set()
     batch_mode = False
+    dashboard_mode = True
+    detail_width = 36
+    pomo_state = {
+        "active": False,
+        "paused": False,
+        "task_id": None,
+        "task_name": "",
+        "start_time": None,
+        "pause_time": None,
+        "elapsed_secs": 0,
+        "duration_secs": 25 * 60,
+        "remaining_secs": 25 * 60,
+        "notified": False,
+    }
     pending_key = ""
 
     term_width = get_term_size().columns
@@ -874,6 +1087,8 @@ def run():
         _save_tui_state({"sort_by": sort_by, "sort_reverse": sort_reverse})
 
     while True:
+        _pomo_tick(pomo_state)
+
         if _term_resized:
             term_width = get_term_size().columns
             _term_resized = False
@@ -883,6 +1098,9 @@ def run():
         display_tasks = current_display_tasks()
 
         frame = []
+        header = render_header_bar(tasks, pomo_state, term_width)
+        frame.append(header)
+        frame.append("\033[33m" + "─" * (term_width - 1) + "\033[0m")
 
         # Logo always at top
         logo = render_logo(term_width)
@@ -894,7 +1112,7 @@ def run():
         if HAS_RICH:
             console = Console(force_terminal=True)
             banner = Panel(
-                "(a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (s)ort  (f)ilter  (x)select  (q)uit",
+                "(a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (p)omo  (s)ort  (f)ilter  (x)select  (q)uit",
                 border_style=AMBER,
                 box=box.ROUNDED,
                 padding=(0, 2),
@@ -904,7 +1122,7 @@ def run():
             frame.extend(cap.get().split("\n"))
         else:
             frame.append(
-                "  (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (s)ort  (f)ilter  (x)select  (q)uit"
+                "  (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (m)anual  (p)omo  (s)ort  (f)ilter  (x)select  (q)uit"
             )
             frame.append("─" * term_width)
 
@@ -1021,6 +1239,27 @@ def run():
         else:
             if not display_tasks:
                 frame.append("  (no tasks)  — press a to add")
+            elif dashboard_mode and term_width >= 72:
+                effective_detail_width = max(28, min(48, detail_width, term_width - 40))
+                left_width = max(30, term_width - effective_detail_width - 1)
+                detail_task_live = (
+                    display_tasks[cursor]
+                    if display_tasks and 0 <= cursor < len(display_tasks)
+                    else None
+                )
+
+                table_lines = render_dashboard_table(display_tasks, cursor, left_width, selected)
+                detail_lines = render_detail_pane(detail_task_live, effective_detail_width)
+                max_rows = max(len(table_lines), len(detail_lines))
+                divider = "\033[33m│\033[0m"
+                import re
+
+                for i in range(max_rows):
+                    left = table_lines[i] if i < len(table_lines) else ""
+                    right = detail_lines[i] if i < len(detail_lines) else ""
+                    plain_left = re.sub(r"\033\[[^m]*m", "", left)
+                    padding = max(0, left_width - len(plain_left))
+                    frame.append(left + " " * padding + divider + right)
             else:
                 table_lines = render_tasks_table(display_tasks, cursor, term_width, selected)
                 frame.extend(table_lines)
@@ -1047,7 +1286,9 @@ def run():
         sys.stdout.write("\033[J")
         sys.stdout.flush()
 
-        key = read_key()
+        key = read_key(1 if pomo_state.get("active") and not pomo_state.get("paused") else None)
+        if not key:
+            continue
 
         if show_edit and edit_task:
             field_def = EDIT_FIELDS[edit_field]
@@ -1104,6 +1345,25 @@ def run():
                 edit_input = ""
                 edit_input_active = False
             elif key == "ESC":
+                if edit_input_active and edit_input:
+                    edit_input = ""
+                else:
+                    show_edit = False
+                    edit_task = None
+            elif key == "w":
+                val = None
+                if ftype == "text" and edit_input.strip():
+                    val = edit_input.strip()
+                elif ftype in ("pick", "time"):
+                    if edit_input_active and edit_input.strip():
+                        val = edit_input.strip()
+                    elif active_options and 0 <= edit_col < len(active_options):
+                        val = active_options[edit_col]
+                elif ftype == "cycle" and active_options:
+                    val = active_options[edit_col % len(active_options)]
+                if val is not None:
+                    _apply_edit_field(edit_task, fkey, val)
+                    tasks = task_list(status=view_mode, limit=50)
                 show_edit = False
                 edit_task = None
             elif edit_input_active:
@@ -1246,6 +1506,41 @@ def run():
             fuzzy_cursor = 0
             pending_key = ""
 
+        elif key == "\\":
+            dashboard_mode = not dashboard_mode
+            show_detail = False
+            pending_key = ""
+
+        elif key == "p" and not show_edit and not fuzzy_active:
+            if display_tasks and 0 <= cursor < len(display_tasks):
+                t = display_tasks[cursor]
+                pomo_state.update({
+                    "active": True,
+                    "paused": False,
+                    "task_id": t.get("id"),
+                    "task_name": (t.get("description") or "")[:30],
+                    "start_time": datetime.datetime.now(),
+                    "pause_time": None,
+                    "elapsed_secs": 0,
+                    "remaining_secs": 25 * 60,
+                    "notified": False,
+                })
+            pending_key = ""
+
+        elif key == "P" and not show_edit and not fuzzy_active:
+            if pomo_state.get("active"):
+                if pomo_state.get("paused"):
+                    pomo_state["paused"] = False
+                    pomo_state["start_time"] = datetime.datetime.now()
+                else:
+                    if pomo_state.get("start_time"):
+                        pomo_state["elapsed_secs"] += (
+                            datetime.datetime.now() - pomo_state["start_time"]
+                        ).total_seconds()
+                    pomo_state["paused"] = True
+                    pomo_state["pause_time"] = datetime.datetime.now()
+            pending_key = ""
+
         elif key == "RIGHT" and not show_detail and not show_edit:
             view_mode = "completed"
             tasks = task_list(status=view_mode, limit=50)
@@ -1337,11 +1632,12 @@ def run():
 
         elif key in ("\r", "\n", "ENTER"):
             if display_tasks and cursor < len(display_tasks):
-                t = display_tasks[cursor]
-                detail_task = task_get(t.get("id"))
-                show_detail = True
-                show_help = False
-                show_sort = False
+                if not dashboard_mode:
+                    t = display_tasks[cursor]
+                    detail_task = task_get(t.get("id"))
+                    show_detail = True
+                    show_help = False
+                    show_sort = False
             pending_key = ""
 
         elif key in ("h", "LEFT") and show_detail:
@@ -1360,11 +1656,12 @@ def run():
 
         elif key == "v":
             if display_tasks and cursor < len(display_tasks):
-                t = display_tasks[cursor]
-                detail_task = task_get(t.get("id"))
-                show_detail = True
-                show_help = False
-                show_sort = False
+                if not dashboard_mode:
+                    t = display_tasks[cursor]
+                    detail_task = task_get(t.get("id"))
+                    show_detail = True
+                    show_help = False
+                    show_sort = False
             pending_key = ""
 
         elif key == "e":
