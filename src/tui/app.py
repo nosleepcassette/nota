@@ -6,12 +6,15 @@ Launch with: nota bene
 Style: vim keybindings, table-based, no emojis, amber theme.
 """
 
+import datetime
+import json
 import os
 import sys
 import select
 import termios
 import tty
 from io import StringIO
+from pathlib import Path
 from typing import Optional, List, Dict
 
 try:
@@ -30,6 +33,53 @@ AMBER_BRIGHT = "rgb(255,200,50)"
 AMBER_DIM = "rgb(210,160,0)"
 CURSOR_AMBER = "rgb(255,140,0)"
 
+_TUI_STATE_PATH = Path.home() / ".config" / "nota" / "tui_state.json"
+
+
+def _load_tui_state() -> dict:
+    try:
+        if _TUI_STATE_PATH.exists():
+            return json.loads(_TUI_STATE_PATH.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_tui_state(state: dict) -> None:
+    try:
+        _TUI_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _TUI_STATE_PATH.write_text(json.dumps(state))
+    except Exception:
+        pass
+
+
+def _due_display(task: dict) -> tuple:
+    """Returns (display_str, style) for due date column."""
+    due = task.get("due") or task.get("dueDate") or ""
+    if not due:
+        return "-", ""
+    try:
+        due = str(due)
+        if due[:8].isdigit():
+            dt = datetime.datetime.strptime(due[:8], "%Y%m%d").date()
+        elif len(due) >= 10:
+            dt = datetime.date.fromisoformat(due[:10])
+        else:
+            return due[:5], ""
+        today = datetime.date.today()
+        delta = (dt - today).days
+        if delta < 0:
+            return f"{abs(delta)}d ago", "bold red"
+        if delta == 0:
+            return "today", "bold yellow"
+        if delta == 1:
+            return "tmrw", "yellow"
+        if delta <= 7:
+            return f"{delta}d", "rgb(255,176,0)"
+        return dt.strftime("%m/%d"), ""
+    except Exception:
+        return due[:5], ""
+
 
 def strip_markup(text: str) -> str:
     import re
@@ -41,7 +91,11 @@ def strip_markup(text: str) -> str:
 
 def read_key() -> str:
     if not sys.stdin.isatty():
-        return input().strip()[:1] if input().strip() else ""
+        try:
+            text = input().strip()
+        except EOFError:
+            return "q"
+        return text[:1] if text else ""
 
     def decode(seq: str) -> str:
         if seq == "":
@@ -168,7 +222,7 @@ def sort_tasks(tasks: List[Dict], sort_by: str, reverse: bool = False) -> List[D
 
 def render_table_plain(tasks: List[Dict], cursor: int, width: int) -> List[str]:
     lines = []
-    header = f"{'ID':<4} {'Pri':<3} {'Proj':<8} {'Scope':<8} {'Due':<8} Description"
+    header = f"{'ID':<4} {'Pri':<3} {'Due':<7} {'Proj':<8} {'Scope':<8} Description"
     lines.append(header)
     lines.append("─" * width)
 
@@ -176,12 +230,12 @@ def render_table_plain(tasks: List[Dict], cursor: int, width: int) -> List[str]:
         marker = ">" if i == cursor else " "
         pri = t.get("priority", "")
         pri_display = {"H": "!!!", "M": "!!", "L": "~", "": "-"}.get(pri, "-")
+        due_display, _ = _due_display(t)
         proj = (t.get("project", "") or "")[:8]
         scope = (t.get("scope", "") or "")[:8]
-        due = t.get("due", "")[:8] if t.get("due") else "-"
         desc = (t.get("description", "") or "")[:50]
         line = (
-            f"{marker}{i + 1:<3} {pri_display:<3} {proj:<8} {scope:<8} {due:<8} {desc}"
+            f"{marker}{i + 1:<3} {pri_display:<3} {due_display:<7} {proj:<8} {scope:<8} {desc}"
         )
         lines.append(line)
 
@@ -196,9 +250,9 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
         w = width
         id_w = 4
         pri_w = 3
+        due_w = 7
         proj_w = 10
         scope_w = 10
-        due_w = 10
         desc_w = w - id_w - pri_w - proj_w - scope_w - due_w - 12
 
         table = Table(
@@ -214,11 +268,9 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
             f"[{AMBER}]ID[/{AMBER}]", style=f"{AMBER_DIM}", width=id_w, no_wrap=True
         )
         table.add_column(f"[{AMBER}]Pri[/{AMBER}]", width=pri_w, no_wrap=True)
+        table.add_column(f"[{AMBER}]DUE[/{AMBER}]", style="", width=due_w, no_wrap=True)
         table.add_column(f"[{AMBER}]Project[/{AMBER}]", style=AMBER, width=proj_w)
         table.add_column(f"[{AMBER}]Scope[/{AMBER}]", style=AMBER, width=scope_w)
-        table.add_column(
-            f"[{AMBER}]Due[/{AMBER}]", style=AMBER, width=due_w, no_wrap=True
-        )
         table.add_column(f"[{AMBER}]Description[/{AMBER}]", min_width=desc_w)
 
         for i, t in enumerate(tasks):
@@ -236,7 +288,7 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
 
             proj = (t.get("project", "") or "")[:proj_w]
             scope = (t.get("scope", "") or "")[:scope_w]
-            due = t.get("due", "")[:10] if t.get("due") else "-"
+            due_display, due_style = _due_display(t)
             desc = t.get("description", "") or ""
 
             if is_cursor:
@@ -247,12 +299,16 @@ def render_tasks_table(tasks: list, cursor: int = 0, width: int = 80) -> List[st
                 style_open = ""
                 style_close = ""
 
+            due_cell = f"{due_display:<{due_w}}"
+            if due_style and not is_cursor:
+                due_cell = f"[{due_style}]{due_cell}[/]"
+
             table.add_row(
                 f"{style_open}{i + 1:<{id_w}}{style_close}",
                 f"{style_open}{pri_display:<{pri_w}}{style_close}",
+                f"{style_open}{due_cell}{style_close}",
                 f"{style_open}{proj:<{proj_w}}{style_close}",
                 f"{style_open}{scope:<{scope_w}}{style_close}",
-                f"{style_open}{due:<{due_w}}{style_close}",
                 f"{style_open}{prefix} {desc}{style_close}",
             )
 
@@ -287,9 +343,18 @@ def render_task_detail(t) -> str:
 
         annotations = t.get("annotations", [])
         if annotations:
-            lines.append("  [bold]Notes:[/bold]")
+            lines.append(f"  [bold {AMBER}]Notes[/]")
             for ann in annotations:
-                lines.append(f"    - {ann.get('description', '')}")
+                desc = ann.get("description") or str(ann)
+                entry = ann.get("entry") or ""
+                date_str = ""
+                if entry:
+                    try:
+                        dt = datetime.datetime.strptime(entry[:8], "%Y%m%d")
+                        date_str = f"[{AMBER_DIM}]{dt.strftime('%m/%d')}[/{AMBER_DIM}]  "
+                    except Exception:
+                        pass
+                lines.append(f"    {date_str}{desc}")
 
         return "\n".join(lines)
     else:
@@ -312,7 +377,16 @@ def render_task_detail(t) -> str:
         if annotations:
             lines.append("  Notes:")
             for ann in annotations:
-                lines.append(f"    - {ann.get('description', '')}")
+                desc = ann.get("description") or str(ann)
+                entry = ann.get("entry") or ""
+                date_str = ""
+                if entry:
+                    try:
+                        dt = datetime.datetime.strptime(entry[:8], "%Y%m%d")
+                        date_str = f"{dt.strftime('%m/%d')}  "
+                    except Exception:
+                        pass
+                lines.append(f"    {date_str}{desc}")
 
         return "\n".join(lines)
 
@@ -320,7 +394,9 @@ def render_task_detail(t) -> str:
 def render_help() -> str:
     return """
   [bold]Commands[/bold]
-    (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit
+    (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (f)ilter  (q)uit
+
+  [dim]DUE column shows countdowns; detail view includes annotations.[/dim]
 
   [dim]press ? for full help[/dim]
 """
@@ -341,9 +417,14 @@ def render_full_help() -> str:
     a               add new task
     e               edit task (opens in editor)
     / or r          search tasks
+    f / F           filter by project / clear project filter
     s               sort menu
     ?               toggle this help
     q               quit
+
+  [bold amber]Display[/bold amber]
+    DUE column      countdown: today, tmrw, 3d, 05/12, or overdue
+    Detail view     shows task annotations under Notes
 
   [bold amber]Sort options[/bold amber]
     s p             sort by project
@@ -420,8 +501,9 @@ def run():
 
     tasks = task_list(status="pending", limit=50)
     cursor = 0
-    sort_by = "id"
-    sort_reverse = False
+    _state = _load_tui_state()
+    sort_by = _state.get("sort_by", "id")
+    sort_reverse = _state.get("sort_reverse", False)
 
     show_help = False
     show_full_help = False
@@ -429,6 +511,7 @@ def run():
     show_sort = False
     detail_task = None
     search_query = ""
+    filter_project = ""
     pending_key = ""
 
     term_width = get_term_size().columns
@@ -436,13 +519,23 @@ def run():
 
     hide_cursor()
 
-    while True:
-        display_tasks = tasks
+    def current_display_tasks() -> List[Dict]:
+        display = tasks
         if search_query:
             q = search_query.lower()
-            display_tasks = [t for t in tasks if q in t.get("description", "").lower()]
+            display = [t for t in display if q in t.get("description", "").lower()]
+        if filter_project:
+            display = [
+                t for t in display
+                if (t.get("project") or "").lower() == filter_project.lower()
+            ]
+        return sort_tasks(display, sort_by, sort_reverse)
 
-        display_tasks = sort_tasks(display_tasks, sort_by, sort_reverse)
+    def save_sort_state() -> None:
+        _save_tui_state({"sort_by": sort_by, "sort_reverse": sort_reverse})
+
+    while True:
+        display_tasks = current_display_tasks()
 
         if first_render:
             clear_screen()
@@ -453,7 +546,7 @@ def run():
         if HAS_RICH:
             console = Console(force_terminal=True)
             banner = Panel(
-                "(a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  (g)o top/bot",
+                "(a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (f)ilter  (q)uit  (g)o top/bot",
                 border_style=AMBER,
                 box=box.ROUNDED,
                 padding=(0, 2),
@@ -463,7 +556,7 @@ def run():
             frame.extend(cap.get().split("\n"))
         else:
             frame.append(
-                "  (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (q)uit  (g)o top/bot"
+                "  (a)dd  (c)omplete  (D)elete  (v)iew  (e)dit  (s)ort  (f)ilter  (q)uit  (g)o top/bot"
             )
             frame.append("─" * term_width)
 
@@ -536,6 +629,8 @@ def run():
         if search_query:
             status_line += f" search: {search_query}  │"
         status_line += f" {len(display_tasks)} tasks"
+        if filter_project:
+            status_line += f"  │ project: {filter_project}  (F to clear)"
         if show_detail:
             status_line += "  │ h/l prev/next, q close"
         status_line += "\033[33m]\033[0m"
@@ -587,24 +682,31 @@ def run():
         elif show_sort:
             if key == "p":
                 sort_by = "project"
+                save_sort_state()
                 show_sort = False
             elif key == "s":
                 sort_by = "scope"
+                save_sort_state()
                 show_sort = False
             elif key == "r":
                 sort_by = "priority"
+                save_sort_state()
                 show_sort = False
             elif key == "d":
                 sort_by = "due"
+                save_sort_state()
                 show_sort = False
             elif key == "t":
                 sort_by = "description"
+                save_sort_state()
                 show_sort = False
             elif key == "i":
                 sort_by = "id"
+                save_sort_state()
                 show_sort = False
             elif key == ".":
                 sort_reverse = not sort_reverse
+                save_sort_state()
             else:
                 show_sort = False
 
@@ -633,12 +735,7 @@ def run():
                 t = display_tasks[cursor]
                 task_delete(t.get("id"))
                 tasks = task_list(status="pending", limit=50)
-                display_tasks = tasks
-                if search_query:
-                    q = search_query.lower()
-                    display_tasks = [
-                        t for t in tasks if q in t.get("description", "").lower()
-                    ]
+                display_tasks = current_display_tasks()
                 if cursor >= len(display_tasks):
                     cursor = max(0, len(display_tasks) - 1)
             pending_key = ""
@@ -648,12 +745,7 @@ def run():
                 t = display_tasks[cursor]
                 task_done(t.get("id"))
                 tasks = task_list(status="pending", limit=50)
-                display_tasks = tasks
-                if search_query:
-                    q = search_query.lower()
-                    display_tasks = [
-                        t for t in tasks if q in t.get("description", "").lower()
-                    ]
+                display_tasks = current_display_tasks()
                 if cursor >= len(display_tasks):
                     cursor = max(0, len(display_tasks) - 1)
             pending_key = ""
@@ -666,12 +758,7 @@ def run():
                 t = display_tasks[cursor]
                 task_delete(t.get("id"))
                 tasks = task_list(status="pending", limit=50)
-                display_tasks = tasks
-                if search_query:
-                    q = search_query.lower()
-                    display_tasks = [
-                        t for t in tasks if q in t.get("description", "").lower()
-                    ]
+                display_tasks = current_display_tasks()
                 if cursor >= len(display_tasks):
                     cursor = max(0, len(display_tasks) - 1)
             pending_key = ""
@@ -713,12 +800,7 @@ def run():
                 t = display_tasks[cursor]
                 os.system(f"task {t.get('id')} edit")
                 tasks = task_list(status="pending", limit=50)
-                display_tasks = tasks
-                if search_query:
-                    q = search_query.lower()
-                    display_tasks = [
-                        t for t in tasks if q in t.get("description", "").lower()
-                    ]
+                display_tasks = current_display_tasks()
             pending_key = ""
 
         elif key == "/":
@@ -731,6 +813,22 @@ def run():
             show_detail = False
             pending_key = ""
 
+        elif key == "f":
+            show_cursor()
+            text, cancelled = read_line("  \033[33mfilter project (blank=all): \033[0m")
+            hide_cursor()
+            if not cancelled and text is not None:
+                filter_project = text.strip()
+            cursor = 0
+            show_detail = False
+            pending_key = ""
+
+        elif key == "F":
+            filter_project = ""
+            cursor = 0
+            show_detail = False
+            pending_key = ""
+
         elif key == "a":
             show_cursor()
             text, cancelled = read_line("  \033[33madd task: \033[0m")
@@ -738,12 +836,7 @@ def run():
             if not cancelled and text and text.strip():
                 _tui_add(text.strip())
                 tasks = task_list(status="pending", limit=50)
-                display_tasks = tasks
-                if search_query:
-                    q = search_query.lower()
-                    display_tasks = [
-                        t for t in tasks if q in t.get("description", "").lower()
-                    ]
+                display_tasks = current_display_tasks()
             pending_key = ""
 
         elif key == "r":
