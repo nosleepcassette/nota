@@ -3,33 +3,22 @@
 # notadash — nota/taskwarrior tmux dashboard
 #
 # Requires: tmux (pane-base-index 1), taskwarrior 3+
-# Optional: mapsOS at ~/dev/mapsOS/bin/maps
 #
 # Layout:
-#   +---------------------------+---------------------+-----------+
-#   |  burndown.daily           |  task summary       | mapsOS    |
-#   |  (left ~45%, top ~62%)    |  (~60% of right)    | (~40%)    |
-#   +---------------------------+---------------------+-----------+
-#   |  task next                |  task overdue       | zsh shell |
-#   |  (left ~45%, bottom ~38%) |  (~50% of right)    | (~50%)    |
-#   +---------------------------+---------------------+-----------+
-#   |  task calendar (full width, bottom 8 lines)                 |
-#   +-------------------------------------------------------------+
+#   |  burndown.daily           |  nota bene (interactive TUI)      |
+#   |                           |                                    |
+#   |  task next (watch 30s)    |                                    |
+#   |  task overdue (watch 60s) |                                    |
+#   |  task calendar (full width, bottom strip)                      |
 #
 # Usage:
 #   notadash          — launch (or re-attach if already running)
 #   notadash kill     — kill the session
-#   notadash refresh  — respawn all data panes (or use prefix+R inside)
+#   notadash refresh [pane|current]
+#                    — refresh all data panes, one named pane, or the
+#                      currently focused data pane inside tmux
 
 SESSION="notadash"
-MAPS_BIN="${HOME}/dev/mapsOS/bin/maps"
-
-INTERVAL_BURNDOWN=60
-INTERVAL_SUMMARY=60
-INTERVAL_NEXT=30
-INTERVAL_OVERDUE=30
-INTERVAL_MAPS=120
-INTERVAL_CALENDAR=3600
 
 # ── guards ────────────────────────────────────────────────────────────────────
 
@@ -38,27 +27,44 @@ command -v task &>/dev/null || { print -u2 "notadash: taskwarrior not found"; ex
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-# Get pane ID by title (set during launch)
+_title_for() {
+  [[ $1 == bene ]] && print "nota bene" || print "$1"
+}
+
 _pane_id() {
-  tmux list-panes -s -t "$SESSION" -F "#{pane_id} #{pane_title}" \
-    | awk -v t="$1" '$2 == t { print $1; exit }'
+  local title
+  title=$(_title_for "$1")
+  tmux list-panes -s -t "$SESSION" -F "#{pane_title}	#{pane_id}" \
+    | awk -F '	' -v t="$title" '$1 == t { print $2; exit }'
 }
 
-# Respawn a named pane with a new command
-_respawn() {
-  local title=$1 cmd=$2
-  local pid
+_pane_cmd() {
+  case "$1" in
+    burndown) print "clear; task burndown.daily" ;;
+    calendar) print "clear; task calendar" ;;
+    bene)     print "nota bene" ;;
+    next)     print "clear; task next" ;;
+    overdue)  print "clear; task overdue" ;;
+    *) return 1 ;;
+  esac
+}
+
+_refresh_pane() {
+  local title=$1 pid cmd
+  [[ $title == bene ]] && return 0
   pid=$(_pane_id "$title")
-  [[ -n $pid ]] && tmux respawn-pane -k -t "$pid" "$cmd"
+  [[ -n $pid ]] || return 1
+
+  cmd=$(_pane_cmd "$title") || return 1
+  tmux send-keys -t "$pid" C-c
+  tmux send-keys -t "$pid" -l -- "$cmd"
+  tmux send-keys -t "$pid" Enter
 }
 
-# Maps command (multi-step, always loop)
-_maps_loop() {
-  if [[ -f "$MAPS_BIN" ]]; then
-    print "while true; do clear; python3 ${MAPS_BIN} check; echo; python3 ${MAPS_BIN} survival; sleep ${INTERVAL_MAPS}; done"
-  else
-    print "echo 'mapsOS not found: ${MAPS_BIN}'"
-  fi
+_current_pane_title() {
+  local title
+  title=$(tmux display-message -p "#{pane_title}")
+  [[ $title == "nota bene" ]] && print bene || print "$title"
 }
 
 # ── kill ──────────────────────────────────────────────────────────────────────
@@ -74,13 +80,36 @@ fi
 
 if [[ $1 == refresh ]]; then
   tmux has-session -t "$SESSION" 2>/dev/null || { print -u2 "notadash: no session running"; exit 1 }
-  _respawn burndown "while true; do clear; task burndown.daily; sleep ${INTERVAL_BURNDOWN}; done"
-  _respawn calendar "while true; do clear; task calendar;       sleep ${INTERVAL_CALENDAR}; done"
-  _respawn summary  "while true; do clear; task summary;        sleep ${INTERVAL_SUMMARY};  done"
-  _respawn next     "while true; do clear; task next;           sleep ${INTERVAL_NEXT};     done"
-  _respawn overdue  "while true; do clear; task overdue;        sleep ${INTERVAL_OVERDUE};  done"
-  _respawn maps     "$(_maps_loop)"
-  print "notadash: panes refreshed"
+  local target=$2
+
+  if [[ -z $target ]]; then
+    _refresh_pane burndown
+    _refresh_pane calendar
+    _refresh_pane bene
+    _refresh_pane next
+    _refresh_pane overdue
+    print "notadash: panes refreshed"
+    exit 0
+  fi
+
+  if [[ $target == current ]]; then
+    target=$(_current_pane_title) || {
+      print -u2 "notadash: could not detect current pane"
+      exit 1
+    }
+  fi
+
+  _pane_cmd "$target" >/dev/null 2>&1 || {
+    print -u2 "notadash: no refresh command for pane '$target'"
+    exit 1
+  }
+
+  _refresh_pane "$target" || {
+    print -u2 "notadash: pane '$target' not found"
+    exit 1
+  }
+
+  print "notadash: refreshed $target"
   exit 0
 fi
 
@@ -91,8 +120,6 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 # ── terminal size ─────────────────────────────────────────────────────────────
-# stty size reads the calling terminal — works in iTerm, fails headless.
-# Falls back to generous defaults (headless use not supported anyway).
 
 local sz
 if sz=$(stty size 2>/dev/null) && [[ -n $sz ]]; then
@@ -102,7 +129,7 @@ else
   local ROWS=60
   local COLS=220
 fi
-(( ROWS -= 1 ))  # tmux status bar
+(( ROWS -= 1 ))
 
 [[ $ROWS -lt 20 || $COLS -lt 80 ]] && {
   print -u2 "notadash: terminal too small (${COLS}x${ROWS}, need 80x20+)"
@@ -110,85 +137,83 @@ fi
 }
 
 # ── layout math ───────────────────────────────────────────────────────────────
-# All sizes absolute (-l flag). Percentages fail in detached sessions.
 
-local cal_rows=8
+local cal_rows=$(( ROWS / 7 ))
+(( cal_rows < 5 )) && cal_rows=5
+(( cal_rows > 10 )) && cal_rows=10
 local top_rows=$(( ROWS - cal_rows - 1 ))
 
-local right_cols=$(( COLS * 55 / 100 ))
-# left_cols = COLS - right_cols - 1   (P_burndown + P_next)
+local bene_cols=$(( COLS * 60 / 100 ))
+(( bene_cols < 80 )) && bene_cols=80
+(( bene_cols > COLS - 30 )) && bene_cols=$(( COLS - 30 ))
+local left_cols=$(( COLS - bene_cols - 1 ))
+(( left_cols < 24 )) && {
+  print -u2 "notadash: terminal too narrow (${COLS} cols, left column would collapse)"
+  exit 1
+}
 
-local next_rows=$(( top_rows * 38 / 100 ))
-# burn_rows = top_rows - next_rows - 1
+local left_rows=$top_rows
+local burn_rows=$(( left_rows * 50 / 100 ))
+(( burn_rows < 10 )) && burn_rows=10
+local next_rows=$(( left_rows * 30 / 100 ))
+(( next_rows < 6 )) && next_rows=6
+local overdue_rows=$(( left_rows - burn_rows - next_rows - 2 ))
+(( overdue_rows < 5 )) && overdue_rows=5
+local lower_rows=$(( next_rows + overdue_rows + 1 ))
 
-local bot_right_rows=$(( top_rows * 40 / 100 ))
-# top_right_rows = top_rows - bot_right_rows - 1
-
-local maps_cols=$(( right_cols * 40 / 100 ))
-# summary_cols = right_cols - maps_cols - 1
-
-local shell_cols=$(( right_cols / 2 ))
-# overdue_cols = right_cols - shell_cols - 1
+local min_top=$(( burn_rows + next_rows + overdue_rows + 2 ))
+if (( left_rows < min_top )); then
+  print -u2 "notadash: terminal too short (${ROWS} rows). Use smaller font."
+  exit 1
+fi
 
 # ── create session ────────────────────────────────────────────────────────────
 
-tmux new-session -d -s "$SESSION" -n dash -x "$COLS" -y "$ROWS"
+tmux new-session -d -s "$SESSION" -n dash
+tmux resize-window -t "$SESSION:dash" -x "$COLS" -y "$ROWS"
 
 # ── splits — capture pane IDs to avoid visual-reindex issues ──────────────────
-# tmux renumbers pane *indices* by visual position; pane *IDs* (%N) are stable.
 
-local P_burn P_cal P_right P_next P_bot P_maps P_shell
+local P_burn P_cal P_bene P_next P_overdue
 
-# Initial pane = burndown
 P_burn=$(tmux display-message -t "$SESSION:dash" -p "#{pane_id}")
-
-# Calendar: bottom strip
 P_cal=$(tmux split-window -v -l $cal_rows -t "$P_burn" -P -F "#{pane_id}")
-
-# Right column: split burndown pane rightward
-P_right=$(tmux split-window -h -l $right_cols -t "$P_burn" -P -F "#{pane_id}")
-
-# Task next: bottom of left (burndown) column
-P_next=$(tmux split-window -v -l $next_rows -t "$P_burn" -P -F "#{pane_id}")
-
-# Bottom-right: bottom of right column
-P_bot=$(tmux split-window -v -l $bot_right_rows -t "$P_right" -P -F "#{pane_id}")
-
-# mapsOS: right slice of top-right (P_right becomes summary, P_maps is corner)
-P_maps=$(tmux split-window -h -l $maps_cols -t "$P_right" -P -F "#{pane_id}")
-
-# Shell: right slice of bottom-right (P_bot becomes overdue, P_shell is corner)
-P_shell=$(tmux split-window -h -l $shell_cols -t "$P_bot" -P -F "#{pane_id}")
+P_bene=$(tmux split-window -h -l $bene_cols -t "$P_burn" -P -F "#{pane_id}")
+P_next=$(tmux split-window -v -l $lower_rows -t "$P_burn" -P -F "#{pane_id}")
+P_overdue=$(tmux split-window -v -l $overdue_rows -t "$P_next" -P -F "#{pane_id}")
 
 # ── name panes (for refresh targeting) ───────────────────────────────────────
 
-tmux select-pane -t "$P_burn"  -T "burndown"
-tmux select-pane -t "$P_cal"   -T "calendar"
-tmux select-pane -t "$P_right" -T "summary"
-tmux select-pane -t "$P_next"  -T "next"
-tmux select-pane -t "$P_bot"   -T "overdue"
-tmux select-pane -t "$P_maps"  -T "maps"
-tmux select-pane -t "$P_shell" -T "shell"
+tmux select-pane -t "$P_burn"    -T "burndown"
+tmux select-pane -t "$P_cal"     -T "calendar"
+tmux select-pane -t "$P_bene"    -T "nota bene"
+tmux select-pane -t "$P_next"    -T "next"
+tmux select-pane -t "$P_overdue" -T "overdue"
 
 # ── send commands ─────────────────────────────────────────────────────────────
 
-tmux send-keys -t "$P_burn"  "while true; do clear; task burndown.daily; sleep ${INTERVAL_BURNDOWN}; done" Enter
-tmux send-keys -t "$P_cal"   "while true; do clear; task calendar;       sleep ${INTERVAL_CALENDAR}; done" Enter
-tmux send-keys -t "$P_right" "while true; do clear; task summary;        sleep ${INTERVAL_SUMMARY};  done" Enter
-tmux send-keys -t "$P_next"  "while true; do clear; task next;           sleep ${INTERVAL_NEXT};     done" Enter
-tmux send-keys -t "$P_bot"   "while true; do clear; task overdue;        sleep ${INTERVAL_OVERDUE};  done" Enter
-tmux send-keys -t "$P_maps"  "$(_maps_loop)" Enter
-tmux send-keys -t "$P_shell" "clear" Enter
+tmux send-keys -t "$P_burn"    -l -- "clear; task burndown.daily"
+tmux send-keys -t "$P_burn"    Enter
+tmux send-keys -t "$P_cal"     -l -- "clear; task calendar"
+tmux send-keys -t "$P_cal"     Enter
+tmux send-keys -t "$P_bene"    -l -- "nota bene"
+tmux send-keys -t "$P_bene"    Enter
+tmux send-keys -t "$P_next"    -l -- "clear; watch -n30 'task next'"
+tmux send-keys -t "$P_next"    Enter
+tmux send-keys -t "$P_overdue" -l -- "clear; watch -n60 'task overdue'"
+tmux send-keys -t "$P_overdue" Enter
 
 # ── session-scoped keybinds ───────────────────────────────────────────────────
 
-# prefix+R: respawn all data panes
+tmux bind-key -T prefix r run-shell "zsh ${0:A} refresh current"
 tmux bind-key -T prefix R run-shell "zsh ${0:A} refresh"
+tmux bind-key -T prefix B select-pane -t "$P_bene"
+tmux bind-key -T prefix N select-pane -t "$P_next"
+tmux bind-key -T prefix D select-pane -t "$P_overdue"
+tmux bind-key -T prefix C select-pane -t "$P_cal"
+tmux bind-key -T prefix U select-pane -t "$P_burn"
 
-# prefix+S: focus shell pane
-tmux bind-key -T prefix S select-pane -t "$P_shell"
+# ── focus bene and attach ─────────────────────────────────────────────────────
 
-# ── focus shell and attach ────────────────────────────────────────────────────
-
-tmux select-pane -t "$P_shell"
+tmux select-pane -t "$P_bene"
 exec tmux attach-session -t "$SESSION"

@@ -16,6 +16,7 @@ nota add "reply to pick n pull -> find stamps :: clean room"
 nota list
 nota show 1
 nota bene         # TUI
+notadash          # tmux dashboard with nota bene + taskwarrior panes
 ```
 
 No rebuild needed after edits — `bin/nota` runs directly from source via symlink.
@@ -83,6 +84,58 @@ nota add "call the dentist sometime next week"
 ```
 
 Works in both CLI and TUI `a` prompt. Requires `GEMINI_API_KEY` in env.
+
+---
+
+## nota bene TUI
+
+Key highlights:
+
+```
+e        smart edit panel — h/l or ←/→ between fields; j/k between options;
+         tab to focus text input; enter to commit; m for $EDITOR fallback
+m        manual edit in $EDITOR
+ctrl+f   fuzzy search — matches description, project, tags, annotations
+         j/k to navigate results; enter to jump; esc to cancel
+←/→      switch pending/completed views; in detail view, previous/next task
+x / B    select tasks / batch selected tasks
+```
+
+The table shows due countdowns, task details include notes and dependency titles,
+and sort order is persisted in `~/.config/nota/tui_state.json`.
+
+---
+
+## Mobile push notifications
+
+`nota cron-check` checks for pending tasks due soon and can POST them to a push
+webhook. The included launchd agent runs every 30 minutes and checks for tasks
+due within 2 hours:
+
+```bash
+nota cron-check --minutes 120 --push-url "$NOTA_PUSH_URL"
+```
+
+Set up an iOS Shortcut with a URL Session automation trigger:
+
+```
+Trigger: Receives URL from webhook POST
+Action: Show notification with task descriptions
+```
+
+Or use a Pushover/ntfy URL as `NOTA_PUSH_URL` for zero-config push.
+
+---
+
+## notadash
+
+`nota bene` + taskwarrior tmux dashboard:
+
+```bash
+notadash
+```
+
+Layout: burndown · `nota bene` interactive TUI · `task next`/`task overdue` · calendar.
 
 ---
 

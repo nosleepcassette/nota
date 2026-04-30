@@ -84,6 +84,46 @@ def run_server(port: int = 5555, host: str = "127.0.0.1") -> None:
     def health():
         return jsonify({"status": "ok", "service": "nota-webhook"}), 200
 
+    @app.post("/nota/push-check")
+    def push_check():
+        """Called by cron. Returns tasks due within threshold_minutes."""
+        if not _check_auth(dict(request.headers)):
+            return jsonify({"error": "unauthorized"}), 401
+
+        import datetime
+        from src.tw import task_list
+
+        threshold = int(request.args.get("minutes", 120))
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+        cutoff = now + datetime.timedelta(minutes=threshold)
+
+        tasks = task_list(status="pending", limit=200)
+        due_soon = []
+        for t in tasks:
+            due = t.get("due") or ""
+            if not due:
+                continue
+            try:
+                if due[:8].isdigit():
+                    dt = datetime.datetime.strptime(due[:15], "%Y%m%dT%H%M%S")
+                else:
+                    dt = datetime.datetime.fromisoformat(due[:19])
+                if now <= dt <= cutoff:
+                    due_soon.append({
+                        "id": t.get("id"),
+                        "description": t.get("description", ""),
+                        "due": due,
+                        "project": t.get("project", ""),
+                    })
+            except Exception:
+                continue
+
+        return jsonify({
+            "due_soon": due_soon,
+            "count": len(due_soon),
+            "checked_at": now.isoformat(),
+        })
+
     print(f"nota webhook running on {host}:{port}", file=sys.stderr)
     print(f"  POST {host}:{port}/nota/capture", file=sys.stderr)
     print(f"  GET  {host}:{port}/nota/next", file=sys.stderr)

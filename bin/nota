@@ -806,6 +806,68 @@ def cmd_webhook(args):
     run_server(port=args.port, host=args.host)
 
 
+def cmd_cron_check(args):
+    import datetime
+    import urllib.error
+    import urllib.request
+
+    threshold = args.minutes
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    cutoff = now + datetime.timedelta(minutes=threshold)
+
+    tasks = task_list(status="pending", limit=200)
+    due_soon = []
+    for t in tasks:
+        due = t.get("due") or ""
+        if not due:
+            continue
+        try:
+            if due[:8].isdigit():
+                dt = datetime.datetime.strptime(due[:15], "%Y%m%dT%H%M%S")
+            else:
+                dt = datetime.datetime.fromisoformat(due[:19])
+            if now <= dt <= cutoff:
+                due_soon.append(t)
+        except Exception:
+            continue
+
+    if not due_soon:
+        print("nota cron-check: no tasks due soon")
+        return
+
+    print(f"nota cron-check: {len(due_soon)} task(s) due within {threshold}m")
+    for t in due_soon:
+        print(f"  [{t.get('id')}] {t.get('description','')}  due:{t.get('due','')[:8]}")
+
+    push_url = args.push_url or os.environ.get("NOTA_PUSH_URL", "")
+    if not push_url:
+        return
+
+    payload = json.dumps({
+        "due_soon": [
+            {
+                "id": t.get("id"),
+                "description": t.get("description", ""),
+                "project": t.get("project", ""),
+                "due": t.get("due", ""),
+            }
+            for t in due_soon
+        ]
+    }).encode()
+
+    token = os.environ.get("NOTA_WEBHOOK_TOKEN", "")
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        req = urllib.request.Request(push_url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            print(f"  pushed to {push_url} -> {resp.status}")
+    except urllib.error.URLError as e:
+        print(f"  push failed: {e}", file=sys.stderr)
+
+
 def cmd_sync(args):
     import subprocess
     from datetime import datetime, timezone
@@ -1262,6 +1324,12 @@ def main():
     p_wh.add_argument("--port", type=int, default=5555, help="Port to listen on (default: 5555)")
     p_wh.add_argument("--host", default="127.0.0.1", help="Host (default: 127.0.0.1, localhost only)")
 
+    p_cron = sub.add_parser("cron-check", help="Check for upcoming due tasks and POST to push webhook")
+    p_cron.add_argument("--minutes", type=int, default=120,
+        help="Tasks due within this many minutes (default: 120)")
+    p_cron.add_argument("--push-url", default="",
+        help="URL to POST task list to (optional; env: NOTA_PUSH_URL)")
+
     p_sync = sub.add_parser("sync", help="Backup tasks to private git remote")
     p_sync.add_argument("--restore", action="store_true", help="Restore from remote (task import)")
     p_sync.add_argument("--remote", default=None, help="Git remote URL (set once; saved to ~/.taskrc-sync)")
@@ -1302,6 +1370,7 @@ def main():
         "habits":     cmd_habits,
         "habit":      cmd_habit,
         "webhook":    cmd_webhook,
+        "cron-check": cmd_cron_check,
         "sync":       cmd_sync,
         "bene":       cmd_bene,
         "mcp":        cmd_mcp,
